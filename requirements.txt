@@ -1,0 +1,14 @@
+pydantic[email]
+fastapi
+uvicorn
+langchain
+langchain-groq
+requests
+langchain_community
+sqlalchemy
+python-jose[cryptography]
+# passlib[bcrypt]
+python-multipart
+pydantic-settings
+email-validator
+argon2-cffi

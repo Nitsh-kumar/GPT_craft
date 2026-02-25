@@ -1,10 +1,10 @@
 import uvicorn
 from fastapi import FastAPI
 from app.core.config import get_settings
-from app.database.base import Base
-from app.database.session import engine
-from app.features.auth.presentation.routes import router as auth_router
-from app.features.auth.infrastructure.models import UserModel
+from app.db.base import Base
+from app.db.session import engine
+from app.api.routes.auth import router as auth_router
+from app.db.models import User
 
 # Initialize settings
 settings = get_settings()

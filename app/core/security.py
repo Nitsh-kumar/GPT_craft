@@ -45,7 +45,7 @@ class SecurityService:
         return encoded_jwt
 
     @staticmethod
-    def verify_token(token: str) -> Optional[str]:
+    def decode_access_token(token: str) -> Optional[str]:
         """
         Verify and decode JWT token, returns email if valid, None otherwise
         """

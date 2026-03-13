@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Outfit', sans-serif;
+  --color-cyan-aurora: #00D2FF;
+  --color-coral-aurora: #FF6B6B;
+  --color-blue-aurora: #2E3192;
+  --color-base-dark: #000000;
+}
+
+@layer utilities {
+  .text-aurora {
+    background: linear-gradient(to right, var(--color-cyan-aurora), var(--color-coral-aurora), var(--color-blue-aurora));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+@variant dark (&:where(.dark, .dark *));

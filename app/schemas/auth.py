@@ -1,10 +1,13 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional
 from datetime import datetime
+
 
 class LoginRequest(BaseModel):
     """Login request"""
     email: EmailStr
     password: str
+
 
 class RegisterRequest(BaseModel):
     """User registration request"""
@@ -12,20 +15,23 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
 
+
 class UserResponse(BaseModel):
-    """User data response"""
+    """User data response — aligned with frontend User type"""
     id: int
     name: str
     email: str
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-    
+    plan: str = "free"  # Computed from the plan relationship
+
     class Config:
         from_attributes = True
 
+
 class LoginResponse(BaseModel):
-    """Login response with token"""
-    access_token: str
-    token_type: str
+    """Login response with token — uses camelCase aliases to match frontend"""
+    access_token: str = Field(serialization_alias="accessToken")
+    token_type: str = Field(serialization_alias="tokenType")
     user: UserResponse
+
+    class Config:
+        populate_by_name = True

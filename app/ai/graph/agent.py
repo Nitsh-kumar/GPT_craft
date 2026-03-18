@@ -3,17 +3,19 @@ from langgraph.prebuilt import ToolNode
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm
 
-# Initialize LLM
-llm = get_llm()
-
 # Define tools here
 tools = []
-llm_with_tools = llm.bind_tools(tools) if tools else llm
 
-def chatbot_node(state: AgentState):
+from langchain_core.runnables import RunnableConfig
+
+def chatbot_node(state: AgentState, config: RunnableConfig):
     """
     The main node representing the chatbot's reasoning.
     """
+    user_tier = config.get("configurable", {}).get("user_tier", "free")
+    llm = get_llm(tier=user_tier)
+    llm_with_tools = llm.bind_tools(tools) if tools else llm
+
     response = llm_with_tools.invoke(state["messages"])
     return {"messages": [response]}
 

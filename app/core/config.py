@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     # AI API Keys
     groq_api_key: Optional[str] = None
     
+    # Frontend URL (for CORS and OAuth redirects)
+    frontend_url: str = "http://localhost:3000"
+    
+    # Google OAuth
+    google_client_id: Optional[str] = None
+    google_client_secret: Optional[str] = None
+    google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

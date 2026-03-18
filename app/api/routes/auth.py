@@ -14,15 +14,16 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     return user
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login")
 def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Login and get access token"""
     user, access_token = AuthService.login(request.email, request.password, db)
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+    response = LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=user
+    )
+    return response.model_dump(by_alias=True)
 
 
 @router.get("/me", response_model=UserResponse)

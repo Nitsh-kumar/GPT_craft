@@ -7,7 +7,7 @@ from app.ai.graph.agent import agent
 
 class ChatService:
     @staticmethod
-    def process_chat(message: str, user_id: int, db: Session) -> ChatResponse:
+    def process_chat(message: str, user_id: int, user_tier: str, db: Session) -> ChatResponse:
         # 1. Policy Enforcement (token check)
         user_limit = TokenUsageCRUD.get_user_limit(db, user_id)
         
@@ -23,7 +23,7 @@ class ChatService:
             
         # 2. Call LangGraph (Inference Engine)
         input_state = {"messages": [HumanMessage(content=message)]}
-        config = {"configurable": {"user_id": user_id}}
+        config = {"configurable": {"user_id": user_id, "user_tier": user_tier}}
         
         try:
             result = agent.invoke(input_state, config=config)

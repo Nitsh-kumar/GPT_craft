@@ -7,9 +7,13 @@ requests
 langchain_community
 sqlalchemy
 python-jose[cryptography]
-# passlib[bcrypt]
+passlib[argon2]
 python-multipart
 pydantic-settings
 email-validator
 argon2-cffi
 psycopg2-binary
+slowapi
+authlib
+httpx
+itsdangerous

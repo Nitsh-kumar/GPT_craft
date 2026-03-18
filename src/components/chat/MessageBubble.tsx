@@ -36,9 +36,6 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
             <div className="h-6 w-6 rounded-lg glass-card flex items-center justify-center overflow-hidden">
               <img src="/craft_logo.png" alt="AI" className="w-4 h-4 object-contain opacity-80" />
             </div>
-            <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500/80">
-              GPTCraft Assistant
-            </span>
           </div>
         )}
 

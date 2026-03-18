@@ -11,19 +11,25 @@ interface MessageListProps {
 
 export const MessageList = ({ messages, isGenerating, userName }: MessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const prevMessageCountRef = useRef(0);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Only scroll when a NEW message is added (user sends), not during streaming updates
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isGenerating]);
+    const currentCount = messages.length;
+    if (currentCount > prevMessageCountRef.current) {
+      // A new message was added — scroll to show the start of the response area
+      if (containerRef.current) {
+        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      }
+    }
+    prevMessageCountRef.current = currentCount;
+  }, [messages.length]);
 
   const firstName = userName?.split(' ')[0] || userName?.split('@')[0] || 'there';
 
   return (
-    <div className="flex-1 overflow-y-auto scrollbar-hide py-8">
+    <div ref={containerRef} className="flex-1 overflow-y-auto scrollbar-hide py-8">
       <div className="max-w-4xl mx-auto flex flex-col min-h-full">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
@@ -52,7 +58,7 @@ export const MessageList = ({ messages, isGenerating, userName }: MessageListPro
                 </span>
               </div>
             )}
-            <div ref={messagesEndRef} className="h-32 shrink-0" />
+            <div ref={messagesEndRef} className="h-4 shrink-0" />
           </>
         )}
       </div>

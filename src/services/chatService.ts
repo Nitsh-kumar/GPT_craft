@@ -38,42 +38,25 @@ export const chatService = {
     });
   },
 
-  getQuota: async (plan: string = 'free'): Promise<Quota> => {
-    // return apiFetch<Quota>('/api/quota');
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const quotas = {
-          free: { requestsRemaining: 50, tokensRemaining: 100000, totalRequests: 50, totalTokens: 100000 },
-          super: { requestsRemaining: 500, tokensRemaining: 1000000, totalRequests: 500, totalTokens: 1000000 },
-          hyper: { requestsRemaining: 5000, tokensRemaining: 10000000, totalRequests: 5000, totalTokens: 10000000 },
-        };
-        resolve(quotas[plan as keyof typeof quotas] || quotas.free);
-      }, 500);
-    });
+  getQuota: async (): Promise<Quota> => {
+    return apiFetch<Quota>('/chat/quota');
   },
 
-  getHistory: async (sessionId: string): Promise<Message[]> => {
-    // return apiFetch<Message[]>(`/api/chat/${sessionId}/history`);
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([]);
-      }, 500);
-    });
+  getConversations: async (): Promise<any[]> => {
+    return apiFetch<any[]>('/chat/conversations');
   },
 
-  /**
-   * streamMessage
-   * 
-   * Sends a chat message to the real backend API.
-   * The backend returns a full response (non-streaming), so we simulate
-   * word-by-word streaming on the frontend for a smooth UX.
-   */
+  getHistory: async (conversationId: string): Promise<Message[]> => {
+    return apiFetch<Message[]>(`/chat/${conversationId}/history`);
+  },
+
   streamMessage: async (
+    conversationId: string | null,
     modelId: string,
     messages: Message[],
     onChunk: (chunk: string) => void,
     signal: AbortSignal
-  ): Promise<void> => {
+  ): Promise<{ conversationId: string }> => {
     const token = getAuthToken();
     
     // Get the last user message to send to the backend
@@ -86,7 +69,10 @@ export const chatService = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ message: lastUserMessage.content }),
+      body: JSON.stringify({ 
+        message: lastUserMessage.content,
+        conversation_id: conversationId ? parseInt(conversationId, 10) : null
+      }),
       signal,
     });
 
@@ -100,6 +86,7 @@ export const chatService = {
 
     const data = await response.json();
     const fullResponse: string = data.response;
+    const newConversationId: string = data.conversation_id.toString();
 
     // Simulate streaming for smooth UX
     const words = fullResponse.split(' ');
@@ -108,5 +95,7 @@ export const chatService = {
       onChunk((i > 0 ? ' ' : '') + words[i]);
       await new Promise(resolve => setTimeout(resolve, 20));
     }
+    
+    return { conversationId: newConversationId };
   },
 };

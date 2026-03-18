@@ -16,10 +16,13 @@ export const ChatPage = () => {
     error,
     models,
     selectedModel,
+    conversations,
+    currentConversationId,
     setSelectedModel,
     sendMessage,
     stopGeneration,
     clearChat,
+    selectConversation,
   } = useChat();
 
   const { quota, isLoading: isQuotaLoading, refreshQuota } = useQuota();
@@ -33,7 +36,13 @@ export const ChatPage = () => {
   const isQuotaExhausted = quota ? quota.requestsRemaining <= 0 || quota.tokensRemaining <= 0 : false;
 
   return (
-    <MainLayout onNewChat={clearChat} onClearChat={clearChat}>
+    <MainLayout 
+      onNewChat={() => selectConversation(null)} 
+      onClearChat={clearChat}
+      conversations={conversations}
+      currentConversationId={currentConversationId}
+      onSelectConversation={selectConversation}
+    >
       <div className="flex flex-col h-full relative">
         {/* Header — quota on the right */}
         <div className="flex items-center justify-end p-4 border-b border-zinc-800/50 z-10 sticky top-0 bg-brand-dark/80 backdrop-blur-sm">

@@ -8,9 +8,19 @@ interface MainLayoutProps {
   children: ReactNode;
   onNewChat?: () => void;
   onClearChat?: () => void;
+  conversations?: any[];
+  currentConversationId?: string | null;
+  onSelectConversation?: (id: string | null) => void;
 }
 
-export const MainLayout = ({ children, onNewChat, onClearChat }: MainLayoutProps) => {
+export const MainLayout = ({ 
+  children, 
+  onNewChat, 
+  onClearChat,
+  conversations = [],
+  currentConversationId = null,
+  onSelectConversation
+}: MainLayoutProps) => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [isHistMenuOpen, setIsHistMenuOpen] = useState(false);
@@ -46,43 +56,33 @@ export const MainLayout = ({ children, onNewChat, onClearChat }: MainLayoutProps
           </button>
         </div>
         
-        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-6">
-          <div className="space-y-1">
-            <div className="px-4 py-2">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Recent History</span>
-            </div>
-            <div className="relative group/h">
-              <button className="w-full text-left px-4 py-3 rounded-2xl glass-card border-brand-cyan/10 flex items-center gap-3 text-sm text-brand-cyan font-medium">
-                <MessageSquare size={16} className="shrink-0" />
-                <span className="truncate flex-1">Current Conversation</span>
-                <div 
-                  className="p-1 rounded-lg hover:bg-brand-cyan/20 transition-colors cursor-pointer"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsHistMenuOpen(!isHistMenuOpen);
-                  }}
-                >
-                  <MoreVertical size={14} />
-                </div>
-              </button>
-              
-              {isHistMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 rounded-2xl glass shadow-2xl z-50 border border-zinc-200/50 dark:border-zinc-800/50 overflow-hidden animate-in">
-                  <button 
-                    onClick={() => {
-                      onClearChat?.();
-                      setIsHistMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-red-500/10 transition-colors font-medium text-left"
-                  >
-                    <Trash2 size={16} />
-                    Clear conversation
-                  </button>
-                </div>
-              )}
-            </div>
+        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+          <div className="px-4 py-2">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Recent History</span>
           </div>
+          
+          {conversations.length === 0 && (
+            <div className="px-4 py-2 text-sm text-zinc-500">No recent conversations</div>
+          )}
+          
+          {conversations.map((conv) => {
+            const isActive = currentConversationId === conv.id.toString();
+            return (
+              <div key={conv.id} className="relative group/h">
+                <button 
+                  onClick={() => onSelectConversation?.(conv.id.toString())}
+                  className={`w-full text-left px-4 py-3 rounded-2xl border flex items-center gap-3 text-sm font-medium transition-colors ${
+                    isActive 
+                      ? 'glass-card border-brand-cyan/30 text-brand-cyan' 
+                      : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-zinc-200'
+                  }`}
+                >
+                  <MessageSquare size={16} className="shrink-0" />
+                  <span className="truncate flex-1">{conv.title}</span>
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         <div className="p-6 border-t border-zinc-200/50 dark:border-zinc-800/50">

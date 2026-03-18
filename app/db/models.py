@@ -78,3 +78,36 @@ class UserDailyLimit(Base):
 
     def __repr__(self):
         return f"<UserDailyLimit(id={self.id}, user_id={self.user_id})>"
+
+
+class Conversation(Base):
+    """Conversation database model"""
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False, default="New Conversation")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="conversations")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Conversation(id={self.id}, title='{self.title}')>"
+
+
+class Message(Base):
+    """Message database model"""
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    role = Column(String, nullable=False)  # 'user' or 'assistant'
+    content = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    conversation = relationship("Conversation", back_populates="messages")
+
+    def __repr__(self):
+        return f"<Message(id={self.id}, role='{self.role}')>"

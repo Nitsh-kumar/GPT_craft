@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     debug: bool = False
     
     # Database
-    database_url: str = "sqlite:///./test.db"
+    database_url: str
     
     # Security
     secret_key: str = "your-secret-key-change-in-production"

@@ -8,6 +8,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -25,7 +26,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (storedToken) {
         try {
           setAuthToken(storedToken);
-          const currentUser = await authService.getCurrentUser();
+          const currentUser = await authService.getCurrentUser(storedToken);
           setUser(currentUser);
         } catch (error) {
           console.error('Failed to restore session', error);
@@ -58,6 +59,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const loginWithToken = async (token: string) => {
+    setIsLoading(true);
+    try {
+      const currentUser = await authService.getCurrentUser(token);
+      setUser(currentUser);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const register = async (name: string, email: string, password: string) => {
     setIsLoading(true);
     try {
@@ -84,6 +95,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isAuthenticated: !!user,
         isLoading,
         login,
+        loginWithToken,
         register,
         logout,
       }}

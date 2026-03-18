@@ -9,11 +9,32 @@ export const chatService = {
     return new Promise((resolve) => {
       setTimeout(() => {
         resolve([
-          { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', description: 'Fast and efficient', requiredPlan: 'free' },
-          { id: 'gpt-4', name: 'GPT-4', description: 'Most capable model', requiredPlan: 'super' },
-          { id: 'claude-3-opus', name: 'Claude 3 Opus', description: 'Powerful reasoning', requiredPlan: 'hyper' },
+          { 
+            id: 'llama3-8b-8192', 
+            name: 'Llama 3 8B', 
+            description: 'Fast, efficient, and versatile for daily tasks.', 
+            requiredPlan: 'free' 
+          },
+          { 
+            id: 'gemma-7b-it', 
+            name: 'Gemma 7B', 
+            description: 'Google-grade lightweight model optimization.', 
+            requiredPlan: 'free' 
+          },
+          { 
+            id: 'mixtral-8x7b-32768', 
+            name: 'Mixtral 8x7B', 
+            description: 'Powerful mixture of experts for complex reasoning.', 
+            requiredPlan: 'super' 
+          },
+          { 
+            id: 'llama3-70b-8192', 
+            name: 'Llama 3 70B', 
+            description: 'Groq\'s most capable reasoning and coding model.', 
+            requiredPlan: 'hyper' 
+          },
         ]);
-      }, 500);
+      }, 300);
     });
   },
 
@@ -43,8 +64,9 @@ export const chatService = {
   /**
    * streamMessage
    * 
-   * Handles the streaming of chat responses from the backend using the native Fetch API.
-   * It uses an AbortController to allow the user to stop the generation mid-stream.
+   * Sends a chat message to the real backend API.
+   * The backend returns a full response (non-streaming), so we simulate
+   * word-by-word streaming on the frontend for a smooth UX.
    */
   streamMessage: async (
     modelId: string,
@@ -54,67 +76,37 @@ export const chatService = {
   ): Promise<void> => {
     const token = getAuthToken();
     
-    // In a real application, you would fetch from your backend endpoint
-    // const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/chat/stream`, {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    //   },
-    //   body: JSON.stringify({ model: modelId, messages }),
-    //   signal,
-    // });
-    
-    // if (!response.ok) {
-    //   if (response.status === 401) throw new Error('Unauthorized');
-    //   if (response.status === 429) throw new Error('Quota exceeded');
-    //   throw new Error(`Server error: ${response.statusText}`);
-    // }
-    
-    // if (!response.body) throw new Error('ReadableStream not supported');
-    
-    // const reader = response.body.getReader();
-    // const decoder = new TextDecoder('utf-8');
-    // let done = false;
-    
-    // while (!done) {
-    //   const { value, done: readerDone } = await reader.read();
-    //   done = readerDone;
-    //   if (value) {
-    //     // Decode the chunk and pass it to the callback
-    //     // Note: SSE chunks might need parsing (e.g., splitting by "data: ")
-    //     const chunkStr = decoder.decode(value, { stream: true });
-    //     onChunk(chunkStr);
-    //   }
-    // }
+    // Get the last user message to send to the backend
+    const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+    if (!lastUserMessage) throw new Error('No user message found');
 
-    // Mock streaming implementation for demonstration
-    return new Promise((resolve, reject) => {
-      const mockResponse = "This is a simulated streaming response from the backend. It demonstrates how tokens are appended to the UI one by one without overwriting the state. It also shows how the scroll management works when new content arrives.";
-      const words = mockResponse.split(' ');
-      let i = 0;
-      
-      const interval = setInterval(() => {
-        if (signal.aborted) {
-          clearInterval(interval);
-          reject(new DOMException('Aborted', 'AbortError'));
-          return;
-        }
-        
-        if (i < words.length) {
-          onChunk((i > 0 ? ' ' : '') + words[i]);
-          i++;
-        } else {
-          clearInterval(interval);
-          resolve();
-        }
-      }, 50); // 50ms per word
-      
-      // Handle abort signal from outside
-      signal.addEventListener('abort', () => {
-        clearInterval(interval);
-        reject(new DOMException('Aborted', 'AbortError'));
-      });
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ message: lastUserMessage.content }),
+      signal,
     });
+
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Unauthorized — please log in again.');
+      if (response.status === 402) throw new Error('Daily token limit exceeded. Please upgrade your plan.');
+      if (response.status === 429) throw new Error('Rate limit exceeded. Please wait a moment.');
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || `Server error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const fullResponse: string = data.response;
+
+    // Simulate streaming for smooth UX
+    const words = fullResponse.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+      onChunk((i > 0 ? ' ' : '') + words[i]);
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
   },
 };

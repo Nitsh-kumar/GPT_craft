@@ -1,6 +1,5 @@
 import React from 'react';
 import { Quota } from '../../types';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
 interface QuotaDisplayProps {
@@ -15,42 +14,23 @@ export const QuotaDisplay = ({ quota, isLoading }: QuotaDisplayProps) => {
   const isExhausted = quota.requestsRemaining <= 0 || quota.tokensRemaining <= 0;
 
   return (
-    <div className="flex items-center gap-4 text-sm">
-      <div className="flex items-center gap-1.5">
-        <span className="text-zinc-500 dark:text-zinc-400">Requests:</span>
+    <div className="flex items-center gap-5 text-[11px] font-bold uppercase tracking-widest">
+      <div className="flex items-center gap-2">
+        <span className="text-zinc-500/80">Requests</span>
         <span className={cn(
-          "font-medium",
-          isExhausted ? "text-red-500" : isNearLimit ? "text-amber-500" : "text-emerald-500"
+          isExhausted ? "text-red-500" : isNearLimit ? "text-amber-500" : "text-brand-cyan"
         )}>
-          {quota.requestsRemaining} / {quota.totalRequests}
+          {quota.requestsRemaining} <span className="text-zinc-600">/ {quota.totalRequests}</span>
         </span>
       </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-zinc-500 dark:text-zinc-400">Tokens:</span>
+      <div className="flex items-center gap-2">
+        <span className="text-zinc-500/80">Tokens</span>
         <span className={cn(
-          "font-medium",
-          isExhausted ? "text-red-500" : isNearLimit ? "text-amber-500" : "text-emerald-500"
+          isExhausted ? "text-red-500" : isNearLimit ? "text-amber-500" : "text-brand-cyan"
         )}>
-          {quota.tokensRemaining.toLocaleString()} / {quota.totalTokens.toLocaleString()}
+          {quota.tokensRemaining.toLocaleString()} <span className="text-zinc-600">/ {quota.totalTokens.toLocaleString()}</span>
         </span>
       </div>
-      
-      {isExhausted ? (
-        <div className="flex items-center gap-1 text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-md">
-          <AlertCircle size={14} />
-          <span className="text-xs font-medium">Quota Exceeded</span>
-        </div>
-      ) : isNearLimit ? (
-        <div className="flex items-center gap-1 text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded-md">
-          <AlertCircle size={14} />
-          <span className="text-xs font-medium">Near Limit</span>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1 text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-md hidden sm:flex">
-          <CheckCircle2 size={14} />
-          <span className="text-xs font-medium">Healthy</span>
-        </div>
-      )}
     </div>
   );
 };

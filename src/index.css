@@ -1,19 +1,43 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Outfit', sans-serif;
-  --color-cyan-aurora: #00D2FF;
-  --color-coral-aurora: #FF6B6B;
-  --color-blue-aurora: #2E3192;
-  --color-base-dark: #000000;
+  --font-sans: 'Inter', 'Outfit', sans-serif;
+  --color-brand-cyan: #22d3ee;
+  --color-brand-teal: #0d9488;
+  --color-brand-zinc: #18181b;
+  --color-brand-dark: #09090b;
+}
+
+@layer base {
+  body {
+    @apply bg-zinc-50 dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 antialiased;
+  }
 }
 
 @layer utilities {
-  .text-aurora {
-    background: linear-gradient(to right, var(--color-cyan-aurora), var(--color-coral-aurora), var(--color-blue-aurora));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .glass {
+    @apply bg-white/70 dark:bg-zinc-900/40 backdrop-blur-md border border-zinc-200/50 dark:border-zinc-800/50;
+  }
+  
+  .glass-card {
+    @apply bg-white/40 dark:bg-zinc-900/20 backdrop-blur-sm border border-zinc-200/30 dark:border-zinc-800/30;
+  }
+
+  .text-glow-cyan {
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+  }
+
+  .bg-gradient-cyan {
+    @apply bg-gradient-to-br from-cyan-500 to-teal-600;
+  }
+
+  .animate-in {
+    animation: animate-in 0.3s ease-out forwards;
+  }
+
+  @keyframes animate-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 }
 

@@ -1,108 +1,80 @@
-# Auth Service API - Backend
+# GPTCraft — AI Chat Backend
 
-A robust FastAPI backend architecture featuring user authentication, plan-based access control, and an AI chat interface powered by LangGraph and Groq.
+A personal AI chat application built with FastAPI, SQLAlchemy, LangGraph, and Groq. The backend contains registration/login, persisted conversations, and an LLM response path.
 
-## 🚀 Features
+**Status:** in development. Authentication, tier handling, quotas, and frontend integration need fixes and runtime verification. This personal project is separate from the employer CRAFT SAP code-migration project.
 
-- **User Authentication**: Secure registration and login using JWT (JSON Web Tokens) and Argon2 password hashing.
-- **Subscription Plans**: Foundation for tiered access with `Plans` and `Users` relationship.
-- **AI Chat Integration**: Advanced LLM reasoning using LangGraph and the Groq Llama3 model.
-- **Token Usage Metering**: Daily token limit enforcement and usage tracking per user.
-- **Database Management**: SQLAlchemy ORM with SQLite (extensible to PostgreSQL/MySQL).
-- **Environment Configuration**: Secure settings management using Pydantic Settings and `.env` files.
+## Branches
 
-## 🛠️ Tech Stack
+| Branch | Contents |
+| --- | --- |
+| `backend` | Default branch: Python API and persistence |
+| [`frontend`](https://github.com/Nitsh-kumar/GPT_craft/tree/frontend) | React/TypeScript interface and API client |
 
-- **Framework**: [FastAPI](https://fastapi.tiangolo.com/)
-- **AI Orchestration**: [LangGraph](https://python.langchain.com/docs/langgraph) / [LangChain](https://python.langchain.com/)
-- **LLM Provider**: [Groq](https://groq.com/)
-- **Database**: SQLAlchemy + SQLite
-- **Security**: JWT + Argon2
-- **Validation**: Pydantic v2
+The UI and API are on separate branches; cloning only the default branch does not include the UI.
 
-## 📁 Project Structure
+## Implemented components
 
-```text
-backend_day_wise/
-├── app/
-│   ├── ai/               # AI reasoning logic (LangGraph, LLM config)
-│   │   ├── graph/        # StateGraph definitions
-│   │   └── llm.py        # LLM provider configuration
-│   ├── api/              # API routes/endpoints
-│   │   └── routes/       # Auth and Chat routers
-│   ├── core/             # Core logic (Security, Config)
-│   ├── db/               # Database models, session, and CRUD
-│   ├── schemas/          # Pydantic models for request/response
-│   ├── services/         # Business logic layer
-│   └── main.py           # Application entry point
-├── .env                  # Environment variables
-├── requirements.txt      # Python dependencies
-└── test.db               # SQLite database (auto-generated)
+- FastAPI auth, chat, and Google OAuth routes.
+- SQLAlchemy user, conversation, message, and token-usage models.
+- Conversation ownership checks in the chat/history flow.
+- A LangGraph chatbot node that calls Groq.
+
+The graph is a chat workflow, not evidence of tool use, multi-agent reasoning, or MCP integration.
+
+## Backend setup
+
+```bash
+git clone --branch backend https://github.com/Nitsh-kumar/GPT_craft.git
+cd GPT_craft
+python -m venv .venv
 ```
 
-## ⚙️ Setup Instructions
+Activate the virtual environment. Install dependencies with `python -m pip install -r requirements.txt`.
 
-### 1. Prerequisites
-- Python 3.10+
-- A Groq API Key (Get one at [console.groq.com](https://console.groq.com/))
+Create a local `.env` file:
 
-### 2. Environment Setup
-Create a `.env` file in the root directory:
-
-```env
-APP_NAME="Auth Service API"
-DEBUG=True
-DATABASE_URL="sqlite:///./test.db"
-SECRET_KEY="your-super-secret-key"
-GROQ_API_KEY="your_groq_api_key_here"
+```dotenv
+DATABASE_URL=sqlite:///./test.db
+SECRET_KEY=replace_with_a_new_random_secret
+GROQ_API_KEY=replace_with_your_provider_key
+FRONTEND_URL=http://localhost:3000
+DEBUG=False
 ```
 
-### 3. Installation
-```powershell
-# Create virtual environment
-python -m venv venv
+Use your own fresh values. Google OAuth additionally requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the configured callback URI. Settings are defined in [app/core/config.py](app/core/config.py).
 
-# Activate virtual environment
-.\venv\Scripts\activate
+The manifest currently omits a direct `langgraph` dependency even though the graph imports it. Resolve and record a compatible version before treating setup as reproducible.
 
-# Install dependencies
-pip install -r requirements.txt
+```bash
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### 4. Running the Application
-```powershell
-uvicorn app.main:app --reload
-```
-The API will be available at `http://127.0.0.1:8000`.
+After successful startup, inspect `http://localhost:8000/docs`. Startup currently creates tables and seeds plans; use an isolated development database.
 
-## 📖 API Documentation
+## API entry points
 
-Once the server is running, you can access the interactive Swagger documentation at:
-- **Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **ReDoc**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/auth/register` | Register |
+| POST | `/auth/login` | Login |
+| POST | `/chat` | Generate a reply |
+| GET | `/chat/conversations` | List the user's conversations |
+| GET | `/chat/{conversation_id}/history` | Read owned history |
+| GET | `/chat/quota` | Return quota information |
 
-### Key Endpoints
+## Frontend setup
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/` | Health Check |
-| `POST` | `/auth/register` | Register a new user |
-| `POST` | `/auth/login` | Login and receive JWT access token |
-| `GET` | `/auth/me` | Get current user details (Requires Token) |
-| `POST` | `/chat` | Chat with AI (Requires Token + Token Balance) |
+Clone `frontend` into a separate directory. Install its dependencies, set `VITE_API_BASE_URL=http://localhost:8000` in its local environment, and run `npm run dev`. Read that branch's README for its build and type-check commands.
 
-## 🛡️ Token Policy & Metering
+Model lists, plan names, and quota contracts currently differ between branches. The UI reveals a completed reply gradually; this is not network token streaming.
 
-The system enforces a daily token limit for AI interactions:
-1. **Initial Credit**: New users are granted 5,000 tokens upon their first chat.
-2. **Daily Tracking**: Usage is tracked per user per calendar day.
-3. **Enforcement**: Responses are blocked if the user's daily limit is exhausted.
-4. **Accuracy**: The system attempts to read metadata from the LLM response for precise billing, falling back to word counts if metadata is unavailable.
+## Engineering follow-up
 
-## 🤝 Contributing
+Fix identity/plan contracts, disabled-user checks, OAuth token transport, and concurrency-safe quota accounting before public exposure. Rate-limit helpers exist, but the chat endpoint does not apply a limiter decorator. No automated backend test suite or CI workflow is present in the reviewed default branch.
 
-1. Fork the project.
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4. Push to the branch (`git push origin feature/AmazingFeature`).
-5. Open a Pull Request.
+See [project status](docs/PROJECT_STATUS.md).
+
+## Validation
+
+This documentation was checked against repository files on 13 October 2026. Builds, application runs, and test suites were not executed during this documentation pass. Commands below describe the intended local workflow, not a verified deployment.

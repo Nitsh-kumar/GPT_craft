@@ -1,12 +1,14 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.db.models import User
+from app.db.models import User, Plans
+from app.db.crud_token import TokenUsageCRUD
 from app.core.security import SecurityService
 from app.schemas.auth import UserResponse
+from app.ai.llm import PLAN_QUOTAS
 
 
 class AuthService:
-    """Centralized authentication business logic"""
+    """Centralized authentication and subscription business logic"""
 
     @staticmethod
     def _user_to_response(user: User) -> UserResponse:
@@ -23,7 +25,6 @@ class AuthService:
 
     @staticmethod
     def register(email: str, password: str, name: str, db: Session) -> UserResponse:
-        # Check if user already exists 
         existing_user = db.query(User).filter(User.email == email).first()
         if existing_user:
             raise HTTPException(
@@ -36,7 +37,7 @@ class AuthService:
             email=email, 
             name=name, 
             hashed_password=hashed_password,
-            plan_id=1 # Default to Free plan
+            plan_id=1  # Default to Free plan
         )
         db.add(user)
         db.commit()
@@ -45,7 +46,6 @@ class AuthService:
 
     @staticmethod
     def login(email: str, password: str, db: Session) -> tuple[UserResponse, str]:
-        # Check if user exists
         user = db.query(User).filter(User.email == email).first()
 
         if not user:
@@ -54,20 +54,18 @@ class AuthService:
                 detail="Invalid email or password"
             )
         
-        # Handle OAuth-only users trying to use password login
         if user.hashed_password is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="This account uses Google Sign-In. Please use the 'Sign in with Google' button."
             )
         
-        # Verify password
         if not SecurityService.verify_password(password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
-        # Check if user is active
+
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -100,3 +98,38 @@ class AuthService:
         
         return AuthService._user_to_response(user)
 
+    @staticmethod
+    def upgrade_plan(user_id: int, plan_name: str, db: Session) -> UserResponse:
+        normalized = plan_name.strip().lower()
+        if normalized not in ("free", "super", "hyper"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid plan. Choose from: free, super, hyper"
+            )
+
+        plan_obj = db.query(Plans).filter(Plans.name == normalized).first()
+        if not plan_obj:
+            plan_map = {"free": (1, 0), "super": (2, 15), "hyper": (3, 39)}
+            pid, price = plan_map[normalized]
+            plan_obj = Plans(id=pid, name=normalized, price=price, description=f"{normalized.capitalize()} plan")
+            db.add(plan_obj)
+            db.flush()
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        user.plan_id = plan_obj.id
+        db.commit()
+        db.refresh(user)
+
+        # Update daily token limit to match the new tier's allowance
+        new_token_limit = PLAN_QUOTAS[normalized]["tokens"]
+        user_limit = TokenUsageCRUD.get_user_limit(db, user.id)
+        if user_limit:
+            user_limit.daily_limit = new_token_limit
+            db.commit()
+        else:
+            TokenUsageCRUD.create_user_limit(db, user.id, initial_limit=new_token_limit)
+
+        return AuthService._user_to_response(user)

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '../types';
+import { PlanType, User } from '../types';
 import { authService } from '../services/authService';
 import { setAuthToken } from '../services/api';
 
@@ -10,6 +10,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   loginWithToken: (token: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  upgradePlan: (plan: PlanType) => Promise<void>;
   logout: () => void;
 }
 
@@ -21,7 +22,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const initAuth = async () => {
-      // In a real app, you might check for a token in localStorage or an HttpOnly cookie
       const storedToken = localStorage.getItem('accessToken');
       if (storedToken) {
         try {
@@ -39,7 +39,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     initAuth();
 
-    // Listen for global unauthorized events (e.g., 401 from API)
     const handleUnauthorized = () => {
       logout();
     };
@@ -81,6 +80,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const upgradePlan = async (plan: PlanType) => {
+    const updatedUser = await authService.upgradePlan(plan);
+    setUser(updatedUser);
+  };
+
   const logout = () => {
     localStorage.removeItem('accessToken');
     setAuthToken(null);
@@ -97,6 +101,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         login,
         loginWithToken,
         register,
+        upgradePlan,
         logout,
       }}
     >

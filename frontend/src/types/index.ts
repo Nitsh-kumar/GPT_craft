@@ -1,5 +1,7 @@
 export type PlanType = 'free' | 'super' | 'hyper';
 
+export type CraftMode = 'standard' | 'architect' | 'code' | 'brainstorm';
+
 export interface User {
   id: string | number;
   email: string;
@@ -7,9 +9,9 @@ export interface User {
   plan: PlanType;
 }
 
-
 export interface AuthResponse {
   accessToken: string;
+  tokenType?: string;
   user: User;
 }
 

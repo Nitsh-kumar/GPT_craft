@@ -37,3 +37,9 @@ GPT_craft/
 
 4. **Verification Before Completion**:
    - Before declaring any task complete, run the verification suite via `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1` (or activate the `gptcraft-verify` skill) to ensure both backend `pytest` and frontend `tsc --noEmit` + `vite build` pass with zero errors.
+
+5. **Mem0 Persistent Memory & Harness Integration**:
+   - The agent harness is integrated with **Mem0** (platform backend scoped to `nit2314`).
+   - On `SessionStart`, active memories are automatically retrieved and injected into the agent's context.
+   - Use the `mem0-memory` skill or `.agents/scripts/mem0_helper.ps1` to query (`search`), add (`add`), or inspect (`list`) long-term memories.
+   - Always persist significant architectural decisions, user preferences, custom runbooks, and resolved defects to Mem0 so that they survive across conversations.

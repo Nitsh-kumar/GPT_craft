@@ -1,8 +1,7 @@
-import React, { ReactNode, useState } from 'react';
+import React, { ReactNode } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, User as UserIcon, MessageSquare, Plus, ShieldCheck, MoreVertical, Trash2 } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
-import { cn } from '../../utils/cn';
+import { LogOut, User as UserIcon, MessageSquare, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -11,29 +10,23 @@ interface MainLayoutProps {
   conversations?: any[];
   currentConversationId?: string | null;
   onSelectConversation?: (id: string | null) => void;
+  onDeleteConversation?: (id: string) => void;
 }
 
 export const MainLayout = ({ 
   children, 
   onNewChat, 
-  onClearChat,
   conversations = [],
   currentConversationId = null,
-  onSelectConversation
+  onSelectConversation,
+  onDeleteConversation,
 }: MainLayoutProps) => {
   const { user, logout } = useAuth();
-  const location = useLocation();
-  const [isHistMenuOpen, setIsHistMenuOpen] = useState(false);
-
-  const navItems = [
-    { icon: MessageSquare, label: 'Chat', path: '/chat' },
-  ];
 
   return (
     <div className="flex h-screen w-full bg-zinc-50 dark:bg-brand-dark text-zinc-900 dark:text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar */}
       <aside className="w-72 border-r border-zinc-200/50 dark:border-zinc-800/50 glass flex flex-col hidden md:flex z-30 relative">
-        {/* Glow Effect */}
         <div className="absolute top-0 -left-20 w-40 h-screen bg-brand-cyan/5 blur-[100px] pointer-events-none" />
         
         <Link to="/chat" className="p-6 flex items-center gap-3 group">
@@ -49,6 +42,7 @@ export const MainLayout = ({
         <div className="p-6">
           <button 
             onClick={onNewChat}
+            data-testid="new-conversation-button"
             className="w-full flex items-center justify-center gap-2 bg-brand-cyan text-brand-dark px-4 py-3 rounded-2xl hover:bg-white transition-all font-bold text-sm shadow-xl shadow-brand-cyan/10 active:scale-95"
           >
             <Plus size={18} />
@@ -68,10 +62,11 @@ export const MainLayout = ({
           {conversations.map((conv) => {
             const isActive = currentConversationId === conv.id.toString();
             return (
-              <div key={conv.id} className="relative group/h">
+              <div key={conv.id} className="relative group/h flex items-center">
                 <button 
                   onClick={() => onSelectConversation?.(conv.id.toString())}
-                  className={`w-full text-left px-4 py-3 rounded-2xl border flex items-center gap-3 text-sm font-medium transition-colors ${
+                  data-testid={`conversation-item-${conv.id}`}
+                  className={`w-full text-left px-4 py-3 pr-10 rounded-2xl border flex items-center gap-3 text-sm font-medium transition-colors ${
                     isActive 
                       ? 'glass-card border-brand-cyan/30 text-brand-cyan' 
                       : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-zinc-200'
@@ -80,6 +75,20 @@ export const MainLayout = ({
                   <MessageSquare size={16} className="shrink-0" />
                   <span className="truncate flex-1">{conv.title}</span>
                 </button>
+                {onDeleteConversation && (
+                  <button
+                    type="button"
+                    data-testid={`delete-conversation-${conv.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteConversation(conv.id.toString());
+                    }}
+                    className="absolute right-2 p-1.5 text-zinc-500 hover:text-red-400 rounded-lg opacity-0 group-hover/h:opacity-100 transition-opacity"
+                    title="Delete conversation"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -92,16 +101,17 @@ export const MainLayout = ({
                 <UserIcon size={20} />
               </div>
               <div className="flex flex-col min-w-0">
-                <div className="text-sm font-bold truncate leading-tight">
+                <div className="text-sm font-bold truncate leading-tight" data-testid="sidebar-user-name">
                   {user?.name || user?.email?.split('@')[0]}
                 </div>
                 <Link 
                   to="/subscription" 
+                  data-testid="manage-subscription-link"
                   className="flex items-center gap-1.5 mt-0.5 group/plan cursor-pointer"
                   title="Manage subscription"
                 >
                   <div className="h-1.5 w-1.5 rounded-full bg-brand-cyan animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-cyan group-hover/plan:text-white transition-colors">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-cyan group-hover/plan:text-white transition-colors" data-testid="sidebar-user-plan">
                     {user?.plan || 'Free'}
                   </span>
                   <ShieldCheck size={10} className="text-brand-cyan/50 group-hover/plan:text-white transition-colors" />
@@ -110,6 +120,7 @@ export const MainLayout = ({
             </div>
             <button 
               onClick={logout}
+              data-testid="logout-button"
               className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
               title="Logout"
             >
@@ -121,7 +132,6 @@ export const MainLayout = ({
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 relative">
-        {/* Glow Effects */}
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-cyan/5 blur-[120px] pointer-events-none" />
         
         {/* Mobile Header */}

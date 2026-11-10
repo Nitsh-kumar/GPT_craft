@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Square, ChevronDown, Lock, Cpu, Zap, Brain } from 'lucide-react';
+import { Send, Square, ChevronDown, Lock, Cpu, Zap, Brain, Sparkles, Compass, Code2, Lightbulb } from 'lucide-react';
 import { cn } from '../../utils/cn';
-import { Model, PlanType } from '../../types';
+import { CraftMode, Model, PlanType } from '../../types';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -11,10 +11,19 @@ interface ChatInputProps {
   models: Model[];
   selectedModel: string;
   setSelectedModel: (modelId: string) => void;
+  selectedMode: CraftMode;
+  setSelectedMode: (mode: CraftMode) => void;
   userPlan: PlanType;
 }
 
 const planHierarchy: Record<PlanType, number> = { free: 0, super: 1, hyper: 2 };
+
+const craftModes: { id: CraftMode; label: string; icon: React.ReactNode }[] = [
+  { id: 'standard', label: 'Standard', icon: <Sparkles size={12} /> },
+  { id: 'architect', label: 'Deep Architect', icon: <Compass size={12} /> },
+  { id: 'code', label: 'Code Craft', icon: <Code2 size={12} /> },
+  { id: 'brainstorm', label: 'Brainstorm', icon: <Lightbulb size={12} /> },
+];
 
 const getModelIcon = (modelId: string, size = 14) => {
   if (modelId.includes('70b')) return <Brain size={size} />;
@@ -30,6 +39,8 @@ export const ChatInput = ({
   models,
   selectedModel,
   setSelectedModel,
+  selectedMode,
+  setSelectedMode,
   userPlan
 }: ChatInputProps) => {
   const [input, setInput] = useState('');
@@ -60,7 +71,6 @@ export const ChatInput = ({
     }
   }, [input]);
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -83,10 +93,11 @@ export const ChatInput = ({
           <div className="relative">
             <textarea
               ref={textareaRef}
+              data-testid="chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={disabled ? "Quota exhausted" : `Ask ${selected?.name || 'GPTCraft'}...`}
+              placeholder={disabled ? "Quota exhausted" : `Ask ${selected?.name || 'GPTCraft'} (${selectedMode} mode)...`}
               disabled={disabled || isGenerating}
               className="m-0 w-full resize-none border-0 bg-transparent px-4 py-3.5 pr-14 focus:ring-0 focus-visible:ring-0 text-sm text-zinc-100 placeholder:text-zinc-500 max-h-48 overflow-y-auto leading-relaxed outline-none"
               rows={1}
@@ -98,6 +109,7 @@ export const ChatInput = ({
               {isGenerating ? (
                 <button
                   onClick={onStop}
+                  data-testid="stop-button"
                   className="flex items-center justify-center h-8 w-8 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-all active:scale-95"
                   title="Stop"
                 >
@@ -106,6 +118,7 @@ export const ChatInput = ({
               ) : (
                 <button
                   onClick={handleSend}
+                  data-testid="send-button"
                   disabled={!input.trim() || disabled}
                   className={cn(
                     "flex items-center justify-center h-8 w-8 rounded-lg transition-all active:scale-95",
@@ -121,13 +134,15 @@ export const ChatInput = ({
             </div>
           </div>
 
-          {/* Bottom toolbar */}
-          <div className="flex items-center justify-between px-3 pb-2.5 pt-0">
+          {/* Bottom toolbar: Model selector + Craft Mode pills */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-0">
             {/* Model selector */}
             <div className="relative" ref={menuRef}>
               <button
+                type="button"
+                data-testid="model-selector-button"
                 onClick={() => setModelMenuOpen(!modelMenuOpen)}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-all text-xs font-medium"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-all text-xs font-medium border border-zinc-800"
               >
                 <span className="text-brand-cyan">{getModelIcon(selected?.id || '', 13)}</span>
                 <span>{selected?.name || 'Model'}</span>
@@ -147,6 +162,8 @@ export const ChatInput = ({
                       return (
                         <button
                           key={model.id}
+                          type="button"
+                          data-testid={`model-option-${model.id}`}
                           disabled={isLocked}
                           onClick={() => {
                             setSelectedModel(model.id);
@@ -172,6 +189,30 @@ export const ChatInput = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Craft Mode Pills */}
+            <div className="flex items-center gap-1 flex-wrap" role="group" aria-label="Craft Mode">
+              {craftModes.map((m) => {
+                const active = selectedMode === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    data-testid={`craft-mode-${m.id}`}
+                    onClick={() => setSelectedMode(m.id)}
+                    className={cn(
+                      "flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
+                      active
+                        ? "bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/40"
+                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 border border-transparent"
+                    )}
+                  >
+                    {m.icon}
+                    <span>{m.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

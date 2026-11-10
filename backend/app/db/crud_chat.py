@@ -34,3 +34,16 @@ class ChatCRUD:
         return db.query(Message).filter(
             Message.conversation_id == conversation_id
         ).order_by(Message.created_at.asc()).all()
+
+    @staticmethod
+    def delete_conversation(db: Session, conversation_id: int, user_id: int) -> bool:
+        conv = db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id
+        ).first()
+        if not conv:
+            return False
+        db.delete(conv)
+        db.commit()
+        return True
+

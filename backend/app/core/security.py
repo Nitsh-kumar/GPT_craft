@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -16,7 +16,7 @@ class SecurityService:
 
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash a password using bcrypt"""
+        """Hash a password using argon2"""
         return pwd_context.hash(password)
 
     @staticmethod
@@ -29,10 +29,11 @@ class SecurityService:
         """Create a JWT access token"""
         settings = get_settings()
         
+        now = datetime.now(timezone.utc)
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = now + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(
+            expire = now + timedelta(
                 minutes=settings.access_token_expire_minutes
             )
 
@@ -43,6 +44,7 @@ class SecurityService:
             algorithm=settings.algorithm
         )
         return encoded_jwt
+
 
     @staticmethod
     def decode_access_token(token: str) -> Optional[str]:

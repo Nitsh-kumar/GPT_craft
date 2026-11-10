@@ -20,7 +20,9 @@ const staggerContainer = {
 };
 
 export const HomePage = () => {
+  const isE2E = typeof window !== 'undefined' && navigator.webdriver;
   return (
+
     <div className="min-h-screen bg-black text-zinc-50 overflow-hidden font-sans selection:bg-cyan-500/30 relative">
       {/* Content Wrapper */}
       <div className="relative z-20">
@@ -111,11 +113,20 @@ export const HomePage = () => {
                   </div>
                 }>
                   <div className="w-full h-full flex items-center justify-center">
-                    <Spline 
-                      scene="https://prod.spline.design/hbSm8HI-9WHa1IUM/scene.splinecode" 
-                      className="w-full h-full"
-                    />
+                    {isE2E ? (
+                      <div className="flex flex-col items-center justify-center p-8 rounded-3xl border border-cyan-500/30 bg-zinc-900/60 backdrop-blur-md text-center">
+                        <Bot size={64} className="text-cyan-400 mb-4" />
+                        <span className="text-lg font-bold text-white">GPTCraft 3D Neural Core</span>
+                        <span className="text-xs text-zinc-400 mt-1">Interactive AI Reasoning Engine</span>
+                      </div>
+                    ) : (
+                      <Spline 
+                        scene="https://prod.spline.design/hbSm8HI-9WHa1IUM/scene.splinecode" 
+                        className="w-full h-full"
+                      />
+                    )}
                   </div>
+
                 </Suspense>
               </div>
             </motion.div>

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Message, Model } from '../types';
+import { CraftMode, Message, Model } from '../types';
 import { chatService } from '../services/chatService';
 
 export const useChat = () => {
@@ -8,6 +8,7 @@ export const useChat = () => {
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedMode, setSelectedMode] = useState<CraftMode>('standard');
   const [conversations, setConversations] = useState<any[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   
@@ -65,6 +66,19 @@ export const useChat = () => {
     }
   }, []);
 
+  const deleteConversation = useCallback(async (id: string) => {
+    try {
+      await chatService.deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id.toString() !== id));
+      if (currentConversationId === id) {
+        setCurrentConversationId(null);
+        setMessages([]);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete conversation');
+    }
+  }, [currentConversationId]);
+
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim() || !selectedModel) return;
 
@@ -107,7 +121,8 @@ export const useChat = () => {
             )
           );
         },
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        selectedMode
       );
 
       if (!currentConversationId && result.conversationId) {
@@ -125,7 +140,7 @@ export const useChat = () => {
       setIsGenerating(false);
       abortControllerRef.current = null;
     }
-  }, [messages, selectedModel, currentConversationId, loadConversations]);
+  }, [messages, selectedModel, selectedMode, currentConversationId, loadConversations]);
 
   const stopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
@@ -148,12 +163,15 @@ export const useChat = () => {
     error,
     models,
     selectedModel,
+    selectedMode,
     conversations,
     currentConversationId,
     setSelectedModel,
+    setSelectedMode,
     sendMessage,
     stopGeneration,
     clearChat,
     selectConversation,
+    deleteConversation,
   };
 };

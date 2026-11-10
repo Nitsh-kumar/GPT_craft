@@ -1,5 +1,5 @@
 import { apiFetch, setAuthToken } from './api';
-import { AuthResponse, User } from '../types';
+import { AuthResponse, PlanType, User } from '../types';
 
 export const authService = {
   login: async (email: string, password: string): Promise<AuthResponse> => {
@@ -17,12 +17,18 @@ export const authService = {
   },
 
   logout: async (): Promise<void> => {
-    // return apiFetch<void>('/api/auth/logout', { method: 'POST' });
     setAuthToken(null);
     return Promise.resolve();
   },
 
   getCurrentUser: async (token: string): Promise<User> => {
     return apiFetch<User>(`/auth/me?token=${token}`);
+  },
+
+  upgradePlan: async (plan: PlanType): Promise<User> => {
+    return apiFetch<User>('/auth/plan', {
+      method: 'POST',
+      body: JSON.stringify({ plan }),
+    });
   },
 };

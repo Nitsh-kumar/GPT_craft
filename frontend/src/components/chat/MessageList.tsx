@@ -1,24 +1,41 @@
 import React, { useRef, useEffect } from 'react';
 import { Message } from '../../types';
 import { MessageBubble } from './MessageBubble';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Compass, Code2, Lightbulb } from 'lucide-react';
 
 interface MessageListProps {
   messages: Message[];
   isGenerating: boolean;
   userName?: string;
+  onQuickPrompt?: (prompt: string) => void;
 }
 
-export const MessageList = ({ messages, isGenerating, userName }: MessageListProps) => {
+const STARTER_CARDS = [
+  {
+    title: 'System Architecture',
+    prompt: 'Design a scalable microservices architecture for a real-time AI chat app.',
+    icon: <Compass size={16} className="text-brand-cyan" />,
+  },
+  {
+    title: 'TypeScript Refactor',
+    prompt: 'Write a clean React custom hook for Server-Sent Events (SSE) streaming.',
+    icon: <Code2 size={16} className="text-emerald-400" />,
+  },
+  {
+    title: 'Product Brainstorm',
+    prompt: 'Give me 3 unique differentiator features for an AI coding assistant.',
+    icon: <Lightbulb size={16} className="text-amber-400" />,
+  },
+];
+
+export const MessageList = ({ messages, isGenerating, userName, onQuickPrompt }: MessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
 
-  // Only scroll when a NEW message is added (user sends), not during streaming updates
   useEffect(() => {
     const currentCount = messages.length;
     if (currentCount > prevMessageCountRef.current) {
-      // A new message was added — scroll to show the start of the response area
       if (containerRef.current) {
         containerRef.current.scrollTop = containerRef.current.scrollHeight;
       }
@@ -39,9 +56,31 @@ export const MessageList = ({ messages, isGenerating, userName }: MessageListPro
                 Hi {firstName}
               </span>
             </div>
-            <h2 className="text-3xl sm:text-4xl font-semibold text-zinc-200 tracking-tight">
+            <h2 className="text-3xl sm:text-4xl font-semibold text-zinc-200 tracking-tight mb-8">
               Where should we start?
             </h2>
+
+            {onQuickPrompt && (
+              <div className="grid sm:grid-cols-3 gap-3 max-w-2xl w-full text-left">
+                {STARTER_CARDS.map((card, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    data-testid={`starter-card-${idx}`}
+                    onClick={() => onQuickPrompt(card.prompt)}
+                    className="p-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800/70 hover:border-brand-cyan/40 transition-all group"
+                  >
+                    <div className="flex items-center gap-2 mb-2 font-semibold text-xs text-zinc-200 group-hover:text-brand-cyan">
+                      {card.icon}
+                      <span>{card.title}</span>
+                    </div>
+                    <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed">
+                      {card.prompt}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <>

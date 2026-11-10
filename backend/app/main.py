@@ -22,24 +22,27 @@ limiter = Limiter(key_func=get_remote_address)
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-# Seed default plan if it doesn't exist
+# Seed default plans if they don't exist
 def seed_default_plan():
-    """Ensure at least a 'Free' plan exists (id=1) for OAuth user creation."""
+    """Ensure Free, Super, and Hyper plans exist in the database."""
     db = SessionLocal()
     try:
-        existing = db.query(Plans).filter(Plans.id == 1).first()
-        if not existing:
-            free_plan = Plans(id=1, name="free", price=0, description="Free plan - 50 requests/day")
-            db.add(free_plan)
-            db.commit()
-            print("✅ Seeded default 'free' plan (id=1)")
-        else:
-            print("✅ Default plan already exists")
+        default_plans = [
+            {"id": 1, "name": "free", "price": 0, "description": "Free plan - 50 requests/day, 5,000 tokens"},
+            {"id": 2, "name": "super", "price": 15, "description": "Super plan - 500 requests/day, 50,000 tokens"},
+            {"id": 3, "name": "hyper", "price": 39, "description": "Hyper plan - 5,000 requests/day, 500,000 tokens"},
+        ]
+        for plan_data in default_plans:
+            existing = db.query(Plans).filter(Plans.id == plan_data["id"]).first()
+            if not existing:
+                db.add(Plans(**plan_data))
+        db.commit()
     except Exception as e:
         db.rollback()
-        print(f"⚠️ Failed to seed default plan: {e}")
+        print(f"⚠️ Failed to seed default plans: {e}")
     finally:
         db.close()
+
 
 seed_default_plan()
 

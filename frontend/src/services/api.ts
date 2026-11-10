@@ -73,7 +73,9 @@ export const apiFetch = async <T>(endpoint: string, options: FetchOptions = {}):
         window.dispatchEvent(new CustomEvent('auth:unauthorized'));
       }
 
-      throw new ApiError(response.status, errorData.message || 'API Error', errorData);
+      const errMessage = errorData.detail || errorData.message || 'API Error';
+      throw new ApiError(response.status, errMessage, errorData);
+
     }
 
     // Return JSON response if content exists

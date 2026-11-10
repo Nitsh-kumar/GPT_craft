@@ -1,6 +1,5 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional
-from datetime import datetime
 
 
 class LoginRequest(BaseModel):
@@ -16,6 +15,11 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+class UpgradePlanRequest(BaseModel):
+    """Upgrade user subscription plan"""
+    plan: str
+
+
 class UserResponse(BaseModel):
     """User data response — aligned with frontend User type"""
     id: int
@@ -23,8 +27,7 @@ class UserResponse(BaseModel):
     email: str
     plan: str = "free"  # Computed from the plan relationship
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoginResponse(BaseModel):
@@ -33,5 +36,4 @@ class LoginResponse(BaseModel):
     token_type: str = Field(serialization_alias="tokenType")
     user: UserResponse
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)

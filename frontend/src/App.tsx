@@ -6,6 +6,7 @@ import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { ChatPage } from './pages/ChatPage';
+import { SubscriptionPage } from './pages/SubscriptionPage';
 import { AuthSuccess } from './pages/AuthSuccess';
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           
           <Route element={<ProtectedRoute />}>
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/subscription" element={<SubscriptionPage />} />
           </Route>
           
           <Route path="*" element={<Navigate to="/" replace />} />

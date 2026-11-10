@@ -16,13 +16,16 @@ export const ChatPage = () => {
     error,
     models,
     selectedModel,
+    selectedMode,
     conversations,
     currentConversationId,
     setSelectedModel,
+    setSelectedMode,
     sendMessage,
     stopGeneration,
     clearChat,
     selectConversation,
+    deleteConversation,
   } = useChat();
 
   const { quota, isLoading: isQuotaLoading, refreshQuota } = useQuota();
@@ -42,6 +45,7 @@ export const ChatPage = () => {
       conversations={conversations}
       currentConversationId={currentConversationId}
       onSelectConversation={selectConversation}
+      onDeleteConversation={deleteConversation}
     >
       <div className="flex flex-col h-full relative">
         {/* Header — quota on the right */}
@@ -51,7 +55,7 @@ export const ChatPage = () => {
 
         {/* Error Banner */}
         {error && (
-          <div className="bg-red-900/20 border-l-4 border-red-500 p-4 m-4 rounded-r-md flex items-start gap-3">
+          <div className="bg-red-900/20 border-l-4 border-red-500 p-4 m-4 rounded-r-md flex items-start gap-3" data-testid="chat-error-banner">
             <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
             <div>
               <h3 className="text-red-200 font-medium text-sm">Error</h3>
@@ -65,6 +69,7 @@ export const ChatPage = () => {
           messages={messages} 
           isGenerating={isGenerating} 
           userName={user?.name || user?.email || undefined}
+          onQuickPrompt={(prompt) => sendMessage(prompt)}
         />
 
         {/* Input Area */}
@@ -76,6 +81,8 @@ export const ChatPage = () => {
           models={models}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
+          selectedMode={selectedMode}
+          setSelectedMode={setSelectedMode}
           userPlan={user?.plan || 'free'}
         />
       </div>

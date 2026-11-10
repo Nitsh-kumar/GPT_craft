@@ -43,3 +43,21 @@ GPT_craft/
    - On `SessionStart`, active memories are automatically retrieved and injected into the agent's context.
    - Use the `mem0-memory` skill or `.agents/scripts/mem0_helper.ps1` to query (`search`), add (`add`), or inspect (`list`) long-term memories.
    - Always persist significant architectural decisions, user preferences, custom runbooks, and resolved defects to Mem0 so that they survive across conversations.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues for `Nitsh-kumar/GPT_craft` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`GLOSSARY.md` and `docs/adr/` at the repository root). See `docs/agents/domain.md`.
+
+### Coding standards
+
+Judgement calls and review conventions for `/code-review`. See `CODING_STANDARDS.md`.

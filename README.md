@@ -67,12 +67,13 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 
 ## Full-stack deployment on Vercel
 
-Import the repository root with the **FastAPI** framework preset. The root
+Import the repository root with the **Other** framework preset. The root
 `vercel.json` builds and type-checks the Vite frontend into root `public/`,
 which Vercel serves from its CDN. GET/HEAD requests for React pages use
 `index.html`; API requests retain their original paths. In particular, GET
-`/chat` opens the UI while POST `/chat` reaches FastAPI. Do not rewrite API
-requests to `/api/index.py` when using the FastAPI framework preset.
+`/chat` opens the UI while POST `/chat` reaches FastAPI. The Python ASGI function is `api/index.py`. The framework is explicitly unset
+to keep Vite static output and API routing together; the FastAPI framework
+preset routes the whole deployment to the backend and must not be selected.
 
 Configure `DATABASE_URL` (persistent PostgreSQL), `SECRET_KEY`, `GROQ_API_KEY`,
 `SUPABASE_URL`, and the public `SUPABASE_ANON_KEY` for the deployment environment.

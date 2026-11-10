@@ -1,16 +1,42 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "framework": "fastapi",
+  "framework": null,
   "buildCommand": "cd frontend && npm ci && npm run lint && npm run build -- --outDir ../public",
   "routes": [
     {
-      "src": "/(?:|login|register|auth-success|subscription|chat)/?",
+      "src": "/auth/(.*)",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/chat",
       "methods": [
-        "GET",
-        "HEAD"
+        "POST",
+        "OPTIONS"
       ],
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/chat/(.*)",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/(health|docs|openapi.json)",
+      "dest": "/api/index.py"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
       "dest": "/index.html"
     }
-  ]
+  ],
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "backend/**",
+      "maxDuration": 300
+    }
+  }
 }

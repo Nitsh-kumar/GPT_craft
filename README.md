@@ -64,3 +64,30 @@ Run the full-stack verification suite anytime with:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
+
+## Full-stack deployment on Vercel
+
+Import the repository root with the **Other** framework preset. The root
+`vercel.json` builds and type-checks the Vite frontend into root `public/`,
+which Vercel serves from its CDN. GET/HEAD requests for React pages use
+`index.html`; API requests retain their original paths. In particular, GET
+`/chat` opens the UI while POST `/chat` reaches FastAPI. The Python ASGI function is `api/index.py`. The framework is explicitly unset
+to keep Vite static output and API routing together; the FastAPI framework
+preset routes the whole deployment to the backend and must not be selected.
+
+Configure `DATABASE_URL` (persistent PostgreSQL), `SECRET_KEY`, `GROQ_API_KEY`,
+`SUPABASE_URL`, and the public `SUPABASE_ANON_KEY` for the deployment environment.
+The Vite build reuses only the public Supabase URL and anon key; optional
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` override those values. Never use
+a Supabase service-role key in these variables. Leave `VITE_API_BASE_URL` unset
+for same-origin API calls. Set production `FRONTEND_URL=https://gptcraft.in`.
+
+Add `https://gptcraft.in/auth-success` to the Supabase Auth redirect allowlist
+and enable the intended auth providers. Custom domain DNS must be configured
+at the authoritative nameserver provider, which may differ from the registrar.
+Use the exact project-specific records shown by Vercel.
+
+After deployment, check `/` and `/login` return HTML, `/health` returns JSON,
+`/chat/models` returns the model catalog, and unauthenticated POST `/chat` is
+rejected by authentication rather than serving HTML. Finish with a real
+sign-in and chat request to verify database and provider credentials.

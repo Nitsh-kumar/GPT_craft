@@ -1,35 +1,42 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
-  "rewrites": [
+  "framework": null,
+  "buildCommand": "cd frontend && npm ci && npm run lint && npm run build -- --outDir ../public",
+  "routes": [
     {
-      "source": "/auth/(.*)",
-      "destination": "/api/index.py"
+      "src": "/auth/(.*)",
+      "dest": "/api/index.py"
     },
     {
-      "source": "/chat/(.*)",
-      "destination": "/api/index.py"
+      "src": "/chat",
+      "methods": [
+        "POST",
+        "OPTIONS"
+      ],
+      "dest": "/api/index.py"
     },
     {
-      "source": "/health",
-      "destination": "/api/index.py"
+      "src": "/chat/(.*)",
+      "dest": "/api/index.py"
     },
     {
-      "source": "/docs",
-      "destination": "/api/index.py"
+      "src": "/(health|docs|openapi.json)",
+      "dest": "/api/index.py"
     },
     {
-      "source": "/openapi.json",
-      "destination": "/api/index.py"
+      "handle": "filesystem"
     },
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
-  ]
+  ],
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "backend/**",
+      "maxDuration": 300
+    }
+  }
 }

@@ -19,8 +19,11 @@ settings = get_settings()
 # Initialize Rate Limiter
 limiter = Limiter(key_func=get_remote_address)
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables defensively
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"⚠️ Failed to create database tables on module load: {e}")
 
 # Seed default plans if they don't exist
 def seed_default_plan():
@@ -83,6 +86,7 @@ app.include_router(google_auth_router)
 
 
 @app.get("/", tags=["health"])
+@app.get("/health", tags=["health"])
 def health_check():
     """Health check endpoint"""
     return {

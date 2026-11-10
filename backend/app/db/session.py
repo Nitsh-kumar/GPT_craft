@@ -6,7 +6,9 @@ settings = get_settings()
 
 database_url = settings.database_url
 if database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
+    database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 engine_kwargs = {}
 if "sqlite" in database_url:

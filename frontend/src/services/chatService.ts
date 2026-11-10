@@ -62,7 +62,10 @@ export const chatService = {
     mode: CraftMode = 'standard'
   ): Promise<{ conversationId: string }> => {
     const token = getAuthToken();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const baseUrl =
+      import.meta.env.VITE_API_BASE_URL !== undefined && import.meta.env.VITE_API_BASE_URL !== ''
+        ? import.meta.env.VITE_API_BASE_URL
+        : (typeof window !== 'undefined' ? window.location.origin : '');
 
     const lastUserMessage = messages.filter((m) => m.role === 'user').pop();
     if (!lastUserMessage) throw new Error('No user message found');

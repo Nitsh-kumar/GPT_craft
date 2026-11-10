@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     debug: bool = False
     
     # Database
-    database_url: str
+    database_url: str = "sqlite:///./app.db"
     
     # Security
     secret_key: str = "your-secret-key-change-in-production"

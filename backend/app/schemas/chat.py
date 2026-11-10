@@ -5,6 +5,8 @@ from datetime import datetime
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[int] = None
+    model: Optional[str] = None
+
 
 class ChatResponse(BaseModel):
     response: str

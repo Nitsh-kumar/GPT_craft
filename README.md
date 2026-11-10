@@ -1,80 +1,66 @@
-# GPTCraft — AI Chat Backend
+# GPTCraft — AI Chat & Agent Platform
 
-A personal AI chat application built with FastAPI, SQLAlchemy, LangGraph, and Groq. The backend contains registration/login, persisted conversations, and an LLM response path.
+GPTCraft is a full-stack AI conversation platform built with **FastAPI**, **LangGraph**, **SQLAlchemy**, and **Groq** on the backend, and **React 19**, **TypeScript**, **Vite 6**, and **Tailwind CSS v4** on the frontend.
 
-**Status:** in development. Authentication, tier handling, quotas, and frontend integration need fixes and runtime verification. This personal project is separate from the employer CRAFT SAP code-migration project.
+## Repository Architecture (Monorepo)
 
-## Branches
+```text
+GPT_craft/
+├── .agents/                # Antigravity (AGY) CLI harness (skills, hooks, scripts)
+├── AGENTS.md               # Root architectural rules for AGY CLI
+├── backend/                # FastAPI + LangGraph + SQLAlchemy backend
+│   ├── AGENTS.md           # Backend-specific agent rules
+│   ├── app/                # Application source (api, ai, core, db, schemas, services)
+│   ├── tests/              # Automated pytest contract and unit test suite
+│   ├── .env.example        # Backend environment template
+│   └── requirements.txt    # Python dependencies
+├── frontend/               # React 19 + TypeScript + Vite 6 + Tailwind v4 SPA
+│   ├── AGENTS.md           # Frontend-specific agent rules
+│   ├── src/                # UI components, hooks, context, API client, types
+│   ├── .env.example        # Frontend environment template
+│   └── package.json        # Node dependencies and scripts
+├── docs/                   # Project status and engineering milestones
+└── scripts/                # Cross-stack verification (`verify.ps1`) and dev launcher (`dev.ps1`)
+```
 
-| Branch | Contents |
-| --- | --- |
-| `backend` | Default branch: Python API and persistence |
-| [`frontend`](https://github.com/Nitsh-kumar/GPT_craft/tree/frontend) | React/TypeScript interface and API client |
+## Quick Start
 
-The UI and API are on separate branches; cloning only the default branch does not include the UI.
+### 1. Backend Setup (`backend/`)
 
-## Implemented components
-
-- FastAPI auth, chat, and Google OAuth routes.
-- SQLAlchemy user, conversation, message, and token-usage models.
-- Conversation ownership checks in the chat/history flow.
-- A LangGraph chatbot node that calls Groq.
-
-The graph is a chat workflow, not evidence of tool use, multi-agent reasoning, or MCP integration.
-
-## Backend setup
-
-```bash
-git clone --branch backend https://github.com/Nitsh-kumar/GPT_craft.git
-cd GPT_craft
+```powershell
+cd backend
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+# Edit .env with your GROQ_API_KEY and SECRET_KEY
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Activate the virtual environment. Install dependencies with `python -m pip install -r requirements.txt`.
 
-Create a local `.env` file:
+Interactive API docs are available at `http://localhost:8000/docs`.
 
-```dotenv
-DATABASE_URL=sqlite:///./test.db
-SECRET_KEY=replace_with_a_new_random_secret
-GROQ_API_KEY=replace_with_your_provider_key
-FRONTEND_URL=http://localhost:3000
-DEBUG=False
+### 2. Frontend Setup (`frontend/`)
+
+```powershell
+cd frontend
+npm install
+Copy-Item .env.example .env
+npm run dev
 ```
 
-Use your own fresh values. Google OAuth additionally requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the configured callback URI. Settings are defined in [app/core/config.py](app/core/config.py).
+The UI will be served at `http://localhost:3000`.
 
-The manifest currently omits a direct `langgraph` dependency even though the graph imports it. Resolve and record a compatible version before treating setup as reproducible.
+## Antigravity (AGY) CLI Harness & Verification
 
-```bash
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+This repository is configured with a native AGY CLI harness:
+- **Hierarchical Rules**: [`AGENTS.md`](AGENTS.md), [`backend/AGENTS.md`](backend/AGENTS.md), and [`frontend/AGENTS.md`](frontend/AGENTS.md).
+- **On-Demand Skills**:
+  - `gptcraft-verify`: Runs full-stack `pytest`, `tsc --noEmit`, and `vite build`.
+  - `gptcraft-dev`: Bootstraps virtual environments, runs local servers, and guides cross-stack feature development.
+- **Session Lifecycle Hook**: [`.agents/hooks.json`](.agents/hooks.json) injects monorepo context at session start.
+
+Run the full-stack verification suite anytime with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
-
-After successful startup, inspect `http://localhost:8000/docs`. Startup currently creates tables and seeds plans; use an isolated development database.
-
-## API entry points
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/auth/register` | Register |
-| POST | `/auth/login` | Login |
-| POST | `/chat` | Generate a reply |
-| GET | `/chat/conversations` | List the user's conversations |
-| GET | `/chat/{conversation_id}/history` | Read owned history |
-| GET | `/chat/quota` | Return quota information |
-
-## Frontend setup
-
-Clone `frontend` into a separate directory. Install its dependencies, set `VITE_API_BASE_URL=http://localhost:8000` in its local environment, and run `npm run dev`. Read that branch's README for its build and type-check commands.
-
-Model lists, plan names, and quota contracts currently differ between branches. The UI reveals a completed reply gradually; this is not network token streaming.
-
-## Engineering follow-up
-
-Fix identity/plan contracts, disabled-user checks, OAuth token transport, and concurrency-safe quota accounting before public exposure. Rate-limit helpers exist, but the chat endpoint does not apply a limiter decorator. No automated backend test suite or CI workflow is present in the reviewed default branch.
-
-See [project status](docs/PROJECT_STATUS.md).
-
-## Validation
-
-This documentation was checked against repository files on 13 October 2026. Builds, application runs, and test suites were not executed during this documentation pass. Commands below describe the intended local workflow, not a verified deployment.

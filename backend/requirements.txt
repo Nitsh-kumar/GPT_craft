@@ -2,7 +2,9 @@ pydantic[email]
 fastapi
 uvicorn
 langchain
+langchain-core
 langchain-groq
+langgraph
 requests
 langchain_community
 sqlalchemy
@@ -17,3 +19,4 @@ slowapi
 authlib
 httpx
 itsdangerous
+pytest

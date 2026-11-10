@@ -71,8 +71,10 @@ export const chatService = {
       },
       body: JSON.stringify({ 
         message: lastUserMessage.content,
-        conversation_id: conversationId ? parseInt(conversationId, 10) : null
+        conversation_id: conversationId ? parseInt(conversationId, 10) : null,
+        model: modelId
       }),
+
       signal,
     });
 

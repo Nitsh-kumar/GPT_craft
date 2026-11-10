@@ -1,11 +1,12 @@
 export type PlanType = 'free' | 'super' | 'hyper';
 
 export interface User {
-  id: string;
+  id: string | number;
   email: string;
   name: string;
   plan: PlanType;
 }
+
 
 export interface AuthResponse {
   accessToken: string;

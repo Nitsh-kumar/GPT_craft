@@ -1,0 +1,12 @@
+{
+  "gptcraft-harness": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/session_start.ps1",
+        "timeout": 10
+      }
+    ]
+  }
+}

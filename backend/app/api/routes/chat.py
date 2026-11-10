@@ -40,9 +40,10 @@ def get_quota(current_user: User = Depends(get_current_user), db: Session = Depe
     if not user_limit:
         user_limit = TokenUsageCRUD.create_user_limit(db, current_user.id, initial_limit=5000)
     
-    tier = getattr(current_user.plan, "name", "free").lower()
+    tier = getattr(current_user, "plan", "free").lower()
     total_tokens = 5000 if tier == "free" else 50000
     total_requests = 50 if tier == "free" else 500
+
     
     # Count today's user messages as requests
     today_start = datetime.combine(date.today(), datetime.min.time())
@@ -75,5 +76,6 @@ def get_history(conversation_id: int, current_user: User = Depends(get_current_u
 @router.post("", response_model=ChatResponse)
 def chat_endpoint(request: Request, body: ChatRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Chat with the AI under token policy enforcement and tier-based rate limit"""
-    tier = getattr(current_user.plan, "name", "free").lower()
-    return ChatService.process_chat(body.message, body.conversation_id, current_user.id, tier, db)
+    tier = getattr(current_user, "plan", "free").lower()
+    return ChatService.process_chat(body.message, body.conversation_id, current_user.id, tier, db, model_id=body.model)
+

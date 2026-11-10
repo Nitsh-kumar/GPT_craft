@@ -1,7 +1,27 @@
+# Python / Backend
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 venv/
-*.env
+.venv/
 *.db
+.pytest_cache/
+.ruff_cache/
+
+# Node / Frontend
+node_modules/
+build/
+dist/
+coverage/
+*.log
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# OS / Editor
+.DS_Store
+Thumbs.db

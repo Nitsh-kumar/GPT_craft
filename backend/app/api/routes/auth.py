@@ -7,11 +7,18 @@ from app.services.auth import AuthService
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register", response_model=UserResponse, status_code=201)
+@router.post("/register", status_code=201)
 def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    """Register new user"""
+    """Register new user and return access token"""
     user = AuthService.register(request.email, request.password, request.name, db)
-    return user
+    _, access_token = AuthService.login(request.email, request.password, db)
+    response = LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=user
+    )
+    return response.model_dump(by_alias=True)
+
 
 
 @router.post("/login")

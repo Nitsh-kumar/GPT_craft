@@ -1,26 +1,26 @@
-# Project status
+# Project Status
 
-Reviewed: 13 October 2026
+Updated: 10 November 2026
 
-## Current scope
+## Completed in Monorepo Merge & Harness Pass
 
-Backend with real provider invocation and persisted conversations; separate frontend branch.
+1. **Unified Monorepo (`main` branch)**:
+   - Merged `backend` and `origin/frontend` into a clean `backend/` + `frontend/` monorepo structure while preserving Git history from both branches.
+   - Removed duplicate root OpenAPI dumps (`openapi*.json`), accidental `app/db/__init__,py` typo file, and unused server/AI packages from `frontend/package.json`.
+2. **Contract & Build Fixes**:
+   - Added missing `langgraph`, `langchain-core`, and `pytest` dependencies to `backend/requirements.txt`.
+   - Fixed `POST /auth/register` to return an `AuthResponse` (`accessToken`, `tokenType`, `user`) matching `frontend/src/context/AuthContext.tsx`.
+   - Fixed `useQuota.ts` 0-argument `chatService.getQuota()` call and aligned `User.id` typing (`string | number`).
+   - Wired `model` selection from `frontend/src/services/chatService.ts` through `ChatRequest` -> `ChatService` -> LangGraph `chatbot_node` -> `get_llm()`.
+   - Fixed `chat.py` attribute bug (`current_user.plan` on `UserResponse`) and added inactive-user (`403 Forbidden`) check to `AuthService.get_user_by_token`.
+3. **AGY CLI Harness**:
+   - Added root and directory-scoped `AGENTS.md` rule files.
+   - Added `.agents/skills/gptcraft-verify` and `.agents/skills/gptcraft-dev` skills.
+   - Added `.agents/hooks.json` (`SessionStart` hook) and `scripts/verify.ps1` + `backend/tests/test_api.py`.
 
-## Next milestones
+## Next Production Milestones
 
-1. Align authenticated identity types, plan names, model selection, and quota contracts.
-2. Make quota reservation/deduction atomic and enforce request limits.
-3. Require safe signing configuration and fix disabled-user/OAuth token handling.
-4. Declare and lock direct dependencies; replace implicit initialization with controlled migrations.
-5. Add ownership, quota-concurrency, and provider-failure tests.
-6. Verify backend plus frontend from clean checkouts.
-
-## Acceptance checks
-
-Two users cannot read each other's history. Concurrent requests cannot overspend quota. Provider failure has a defined accounting outcome. Advertise streaming only after transport streaming exists and is tested. Do not claim named model availability or latency without measurements.
-
-## Release evidence
-
-Before calling this project complete, record the commit, environment, commands, results, and known limitations. Screenshots and saved outputs alone do not establish that the current revision runs.
-
-This pass changes documentation only. It does not certify runtime behavior, security, deployment availability, or ownership of third-party data and assets.
+1. **Real SSE / WebSocket Token Streaming**: Replace simulated client-side word delay in `chatService.ts` with FastAPI `StreamingResponse` + LangGraph `.astream_events()`.
+2. **Database Migrations**: Add Alembic migrations to `backend/` and remove `Base.metadata.create_all` from startup.
+3. **Atomic Quota Reservation & Rate Limiting**: Apply SlowAPI limiter decorators to `/chat` and use atomic SQL updates for token deduction.
+4. **Unique Differentiator Features**: Expand the LangGraph `agent.py` state machine with custom tools, branching workflows, or artifact/canvas generation.

@@ -12,12 +12,15 @@ def chatbot_node(state: AgentState, config: RunnableConfig):
     """
     The main node representing the chatbot's reasoning.
     """
-    user_tier = config.get("configurable", {}).get("user_tier", "free")
-    llm = get_llm(tier=user_tier)
+    configurable = config.get("configurable", {})
+    user_tier = configurable.get("user_tier", "free")
+    model_id = configurable.get("model_id")
+    llm = get_llm(tier=user_tier, model_id=model_id)
     llm_with_tools = llm.bind_tools(tools) if tools else llm
 
     response = llm_with_tools.invoke(state["messages"])
     return {"messages": [response]}
+
 
 # Define the graph
 graph_builder = StateGraph(AgentState)

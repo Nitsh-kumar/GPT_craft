@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Quota } from '../types';
 import { chatService } from '../services/chatService';
-import { useAuth } from '../context/AuthContext';
 
 export const useQuota = () => {
-  const { user } = useAuth();
   const [quota, setQuota] = useState<Quota | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +10,7 @@ export const useQuota = () => {
   const fetchQuota = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await chatService.getQuota(user?.plan);
+      const data = await chatService.getQuota();
       setQuota(data);
       setError(null);
     } catch (err: any) {
@@ -28,3 +26,4 @@ export const useQuota = () => {
 
   return { quota, isLoading, error, refreshQuota: fetchQuota };
 };
+

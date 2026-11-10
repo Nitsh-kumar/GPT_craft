@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Square, ChevronDown, Lock, Cpu, Zap, Brain, Sparkles, Compass, Code2, Lightbulb } from 'lucide-react';
+import { ArrowUp, Square, ChevronDown, Lock, Cpu, Zap, Brain, Sparkles, Compass, Code2, Lightbulb, Check } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { CraftMode, Model, PlanType } from '../../types';
 
@@ -82,87 +82,60 @@ export const ChatInput = ({
   }, []);
 
   return (
-    <div className="w-full pt-2 pb-4 px-4">
-      <div className="max-w-3xl mx-auto">
-        <div className={cn(
-          "w-full rounded-2xl border border-zinc-700/60 bg-zinc-900/80 transition-all duration-200",
-          !disabled && "focus-within:border-brand-cyan/40 focus-within:shadow-[0_0_20px_rgba(0,210,211,0.06)]",
-          disabled && "opacity-50 cursor-not-allowed"
-        )}>
-          {/* Input row */}
-          <div className="relative">
-            <textarea
-              ref={textareaRef}
-              data-testid="chat-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={disabled ? "Quota exhausted" : `Ask ${selected?.name || 'GPTCraft'} (${selectedMode} mode)...`}
-              disabled={disabled || isGenerating}
-              className="m-0 w-full resize-none border-0 bg-transparent px-4 py-3.5 pr-14 focus:ring-0 focus-visible:ring-0 text-sm text-zinc-100 placeholder:text-zinc-500 max-h-48 overflow-y-auto leading-relaxed outline-none"
-              rows={1}
-              style={{ minHeight: '44px' }}
-            />
-            
-            {/* Send button inline */}
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              {isGenerating ? (
-                <button
-                  onClick={onStop}
-                  data-testid="stop-button"
-                  className="flex items-center justify-center h-8 w-8 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-all active:scale-95"
-                  title="Stop"
-                >
-                  <Square size={14} className="fill-current" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  data-testid="send-button"
-                  disabled={!input.trim() || disabled}
-                  className={cn(
-                    "flex items-center justify-center h-8 w-8 rounded-lg transition-all active:scale-95",
-                    input.trim() && !disabled 
-                      ? "bg-brand-cyan text-brand-dark hover:bg-white" 
-                      : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-                  )}
-                  title="Send"
-                >
-                  <Send size={15} />
-                </button>
-              )}
-            </div>
-          </div>
+    <div className="w-full bg-canvas px-4 pt-2 pb-4 sm:px-8">
+      <div className="mx-auto max-w-3xl">
+        <div
+          className={cn(
+            'w-full rounded-2xl border border-line-strong bg-raised shadow-lift transition-[border-color,box-shadow] duration-200',
+            !disabled && 'focus-within:border-ember focus-within:shadow-float',
+            disabled && 'cursor-not-allowed opacity-60'
+          )}
+        >
+          <label htmlFor="chat-input" className="sr-only">Message</label>
+          <textarea
+            id="chat-input"
+            ref={textareaRef}
+            data-testid="chat-input"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={disabled ? "You've used today's quota. Upgrade or come back tomorrow." : `Message ${selected?.name || 'GPTCraft'}…`}
+            disabled={disabled || isGenerating}
+            className="m-0 block max-h-52 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-4 pb-2 text-[0.95rem] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus:ring-0 focus-visible:outline-none"
+            rows={1}
+            style={{ minHeight: '52px' }}
+          />
 
-          {/* Bottom toolbar: Model selector + Craft Mode pills */}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-0">
-            {/* Model selector */}
-            <div className="relative" ref={menuRef}>
-              <button
-                type="button"
-                data-testid="model-selector-button"
-                onClick={() => setModelMenuOpen(!modelMenuOpen)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-all text-xs font-medium border border-zinc-800"
-              >
-                <span className="text-brand-cyan">{getModelIcon(selected?.id || '', 13)}</span>
-                <span>{selected?.name || 'Model'}</span>
-                <ChevronDown size={11} className={cn("transition-transform", modelMenuOpen && "rotate-180")} />
-              </button>
+          <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
+            <div className="flex min-w-0 items-center gap-1">
+              {/* Model selector */}
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  data-testid="model-selector-button"
+                  aria-haspopup="listbox"
+                  aria-expanded={modelMenuOpen}
+                  onClick={() => setModelMenuOpen(!modelMenuOpen)}
+                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-2 transition-colors hover:bg-sunken hover:text-ink"
+                >
+                  <span className="text-ember">{getModelIcon(selected?.id || '', 14)}</span>
+                  <span className="max-w-[9rem] truncate">{selected?.name || 'Model'}</span>
+                  <ChevronDown size={12} className={cn('text-ink-3 transition-transform', modelMenuOpen && 'rotate-180')} />
+                </button>
 
-              {modelMenuOpen && (
-                <div className="absolute left-0 bottom-full mb-2 w-64 rounded-xl bg-zinc-900 border border-zinc-700/60 shadow-2xl z-50 overflow-hidden">
-                  <div className="p-1.5">
-                    <div className="px-2.5 py-1.5">
-                      <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">Select Model</span>
-                    </div>
+                {modelMenuOpen && (
+                  <div className="absolute bottom-full left-0 z-50 mb-2 w-72 animate-in overflow-hidden rounded-xl border border-line bg-raised p-1.5 shadow-float" role="listbox">
+                    <div className="px-2.5 pt-1.5 pb-2 text-xs font-medium text-ink-3">Model</div>
                     {models.map((model) => {
                       const isLocked = planHierarchy[model.requiredPlan] > planHierarchy[userPlan];
                       const isSelected = model.id === selectedModel;
-                      
+
                       return (
                         <button
                           key={model.id}
                           type="button"
+                          role="option"
+                          aria-selected={isSelected}
                           data-testid={`model-option-${model.id}`}
                           disabled={isLocked}
                           onClick={() => {
@@ -170,55 +143,90 @@ export const ChatInput = ({
                             setModelMenuOpen(false);
                           }}
                           className={cn(
-                            "flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg transition-all text-left text-sm",
-                            isSelected ? "bg-brand-cyan/10 text-brand-cyan" : "text-zinc-300 hover:bg-zinc-800",
-                            isLocked && "opacity-40 cursor-not-allowed"
+                            'flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors',
+                            isSelected ? 'bg-ember-soft' : 'hover:bg-sunken',
+                            isLocked && 'cursor-not-allowed opacity-55 hover:bg-transparent'
                           )}
                         >
-                          <span className={cn(isSelected ? "text-brand-cyan" : "text-zinc-500")}>
-                            {getModelIcon(model.id, 14)}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-xs">{model.name}</div>
-                            <div className="text-[10px] text-zinc-500 truncate">{model.description}</div>
+                          <span className={cn('mt-0.5', isSelected ? 'text-ember' : 'text-ink-3')}>{getModelIcon(model.id, 15)}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-ink">{model.name}</div>
+                            <div className="truncate text-xs text-ink-3">
+                              {isLocked ? `Requires ${model.requiredPlan} plan` : model.description}
+                            </div>
                           </div>
-                          {isLocked && <Lock size={11} className="text-zinc-500 shrink-0" />}
+                          {isLocked ? (
+                            <Lock size={13} className="mt-1 shrink-0 text-ink-3" />
+                          ) : (
+                            isSelected && <Check size={14} className="mt-1 shrink-0 text-ember" />
+                          )}
                         </button>
                       );
                     })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+
+              <span className="mx-1 h-4 w-px shrink-0 bg-line" aria-hidden />
+
+              {/* Craft Mode */}
+              <div className="flex items-center gap-0.5 overflow-x-auto" role="group" aria-label="Craft Mode">
+                {craftModes.map((m) => {
+                  const active = selectedMode === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      data-testid={`craft-mode-${m.id}`}
+                      aria-pressed={active}
+                      title={m.label}
+                      onClick={() => setSelectedMode(m.id)}
+                      className={cn(
+                        'flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+                        active ? 'bg-ember-soft text-ember' : 'text-ink-3 hover:bg-sunken hover:text-ink'
+                      )}
+                    >
+                      {m.icon}
+                      <span className={cn(!active && 'max-md:hidden')}>{m.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Craft Mode Pills */}
-            <div className="flex items-center gap-1 flex-wrap" role="group" aria-label="Craft Mode">
-              {craftModes.map((m) => {
-                const active = selectedMode === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    data-testid={`craft-mode-${m.id}`}
-                    onClick={() => setSelectedMode(m.id)}
-                    className={cn(
-                      "flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
-                      active
-                        ? "bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/40"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 border border-transparent"
-                    )}
-                  >
-                    {m.icon}
-                    <span>{m.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {isGenerating ? (
+              <button
+                onClick={onStop}
+                data-testid="stop-button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink text-canvas transition-transform active:scale-95"
+                title="Stop generating"
+                aria-label="Stop generating"
+              >
+                <Square size={12} className="fill-current" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                data-testid="send-button"
+                disabled={!input.trim() || disabled}
+                className={cn(
+                  'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-[background-color,transform] active:scale-95',
+                  input.trim() && !disabled
+                    ? 'bg-ember text-on-ember hover:bg-ember-hover'
+                    : 'cursor-not-allowed bg-sunken text-ink-3'
+                )}
+                title="Send message"
+                aria-label="Send message"
+              >
+                <ArrowUp size={17} strokeWidth={2.25} />
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="mt-2 text-center text-[10px] text-zinc-600 uppercase tracking-widest">
-          GPTCraft Premium AI • Intelligently Crafted
+        <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-ink-3 font-mono">
+          <span>Enter to send · Shift + Enter for new line</span>
+          <span className="max-sm:hidden">⚡ Groq LPU Engine</span>
         </div>
       </div>
     </div>

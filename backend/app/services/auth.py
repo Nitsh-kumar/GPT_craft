@@ -77,19 +77,62 @@ class AuthService:
 
     @staticmethod
     def get_user_by_token(token: str, db: Session) -> UserResponse:
-        email = SecurityService.decode_access_token(token)
-        if not email:
+        claims = SecurityService.decode_token_claims(token)
+        if not claims or not claims.get("email"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
             )
         
-        user = db.query(User).filter(User.email == email).first()
+        email = claims["email"]
+        sub = claims.get("sub")
+        name = claims.get("name") or email.split("@")[0]
+
+        # 1. Lookup by supabase_uid if present
+        user = None
+        if sub:
+            user = db.query(User).filter(User.supabase_uid == sub).first()
+        
+        # 2. Lookup by email fallback
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found"
+            user = db.query(User).filter(User.email == email).first()
+            if user:
+                changed = False
+                if sub and not user.supabase_uid:
+                    user.supabase_uid = sub
+                    changed = True
+                if name and (not user.name or user.name.strip() in ("", "User")):
+                    user.name = name
+                    changed = True
+                if changed:
+                    db.commit()
+                    db.refresh(user)
+        
+        # 3. If user signed up via Supabase and does not exist in DB yet, auto-provision
+        if not user:
+            free_plan = db.query(Plans).filter(Plans.name == "free").first()
+            plan_id = free_plan.id if free_plan else 1
+            user = User(
+                email=email,
+                name=name,
+                supabase_uid=sub,
+                plan_id=plan_id,
+                is_active=True
             )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        # 4. Ensure user daily token limit exists for today
+        user_limit = TokenUsageCRUD.get_user_limit(db, user.id)
+        if not user_limit:
+            plan_name = user.plan.name.lower() if user.plan else "free"
+            TokenUsageCRUD.create_user_limit(
+                db, 
+                user.id, 
+                initial_limit=PLAN_QUOTAS.get(plan_name, {}).get("tokens", 5000)
+            )
+
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

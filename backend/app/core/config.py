@@ -29,8 +29,13 @@ class Settings(BaseSettings):
     google_client_secret: Optional[str] = None
     google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
     
+    # Supabase Auth & Database
+    supabase_url: Optional[str] = None
+    supabase_anon_key: Optional[str] = None
+    supabase_jwt_secret: Optional[str] = None
+    
     model_config = ConfigDict(
-        env_file=".env",
+        env_file=(".env", "backend/.env"),
         case_sensitive=False,
         extra="ignore",
     )

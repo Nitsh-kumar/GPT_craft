@@ -114,15 +114,20 @@ export const chatService = {
           if (!line.startsWith('data: ')) continue;
           const jsonStr = line.slice(6).trim();
           if (!jsonStr) continue;
+          let event: any;
           try {
-            const event = JSON.parse(jsonStr);
-            if (event.type === 'chunk' && typeof event.content === 'string') {
-              onChunk(event.content);
-            } else if (event.type === 'done' && event.conversation_id) {
-              resolvedConversationId = event.conversation_id.toString();
-            }
+            event = JSON.parse(jsonStr);
           } catch {
             // ignore malformed SSE frame
+            continue;
+          }
+
+          if (event.type === 'chunk' && typeof event.content === 'string') {
+            onChunk(event.content);
+          } else if (event.type === 'done' && event.conversation_id) {
+            resolvedConversationId = event.conversation_id.toString();
+          } else if (event.type === 'error') {
+            throw new Error(event.error || 'Server error during generation');
           }
         }
       }

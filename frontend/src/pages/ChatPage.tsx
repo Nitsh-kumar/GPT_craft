@@ -48,18 +48,18 @@ export const ChatPage = () => {
       onDeleteConversation={deleteConversation}
     >
       <div className="flex flex-col h-full relative">
-        {/* Header — quota on the right */}
-        <div className="flex items-center justify-end p-4 border-b border-zinc-800/50 z-10 sticky top-0 bg-brand-dark/80 backdrop-blur-sm">
+        {/* Header — usage on the right */}
+        <div className="sticky top-0 z-10 flex h-12 items-center justify-end border-b border-line bg-canvas px-5">
           <QuotaDisplay quota={quota} isLoading={isQuotaLoading} />
         </div>
 
         {/* Error Banner */}
         {error && (
-          <div className="bg-red-900/20 border-l-4 border-red-500 p-4 m-4 rounded-r-md flex items-start gap-3" data-testid="chat-error-banner">
-            <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
+          <div className="mx-auto mt-4 flex w-[calc(100%-2rem)] max-w-3xl items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft p-4" data-testid="chat-error-banner" role="alert">
+            <AlertTriangle className="mt-0.5 shrink-0 text-danger" size={18} />
             <div>
-              <h3 className="text-red-200 font-medium text-sm">Error</h3>
-              <p className="text-red-300 text-sm mt-1">{error}</p>
+              <h3 className="text-sm font-medium text-ink">Something went wrong</h3>
+              <p className="mt-1 text-sm text-ink-2">{error}</p>
             </div>
           </div>
         )}
@@ -69,7 +69,12 @@ export const ChatPage = () => {
           messages={messages} 
           isGenerating={isGenerating} 
           userName={user?.name || user?.email || undefined}
-          onQuickPrompt={(prompt) => sendMessage(prompt)}
+          selectedMode={selectedMode}
+          selectedModelName={models.find(m => m.id === selectedModel)?.name}
+          onQuickPrompt={(prompt, mode) => {
+            if (mode) setSelectedMode(mode);
+            sendMessage(prompt);
+          }}
         />
 
         {/* Input Area */}

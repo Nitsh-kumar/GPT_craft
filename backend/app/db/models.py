@@ -30,7 +30,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=True)  # Nullable for OAuth users
+    hashed_password = Column(String, nullable=True)  # Nullable for OAuth/Supabase users
+    supabase_uid = Column(String, unique=True, index=True, nullable=True)  # Supabase auth.users UUID
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -8,8 +8,8 @@ export const ProtectedRoute = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
-        <Loader2 className="animate-spin text-cyan-600" size={32} />
+      <div className="min-h-screen flex items-center justify-center bg-canvas">
+        <Loader2 className="animate-spin text-ember" size={32} />
       </div>
     );
   }

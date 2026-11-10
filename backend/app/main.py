@@ -54,11 +54,13 @@ app = FastAPI(
     debug=settings.debug
 )
 
-# Set up CORS — allow frontend origins (support both common dev ports)
+# Set up CORS — allow frontend origins (support both common dev ports and custom domain)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         settings.frontend_url,
+        "https://gptcraft.in",
+        "https://www.gptcraft.in",
         "http://localhost:3000",
         "http://localhost:5173",
     ],

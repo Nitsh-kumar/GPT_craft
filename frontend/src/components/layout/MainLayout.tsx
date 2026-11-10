@@ -1,7 +1,9 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, User as UserIcon, MessageSquare, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { LogOut, Plus, Trash2, Menu, X, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ThemeSwitcher } from './ThemeSwitcher';
+import { cn } from '../../utils/cn';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -13,67 +15,89 @@ interface MainLayoutProps {
   onDeleteConversation?: (id: string) => void;
 }
 
-export const MainLayout = ({ 
-  children, 
-  onNewChat, 
+export const MainLayout = ({
+  children,
+  onNewChat,
   conversations = [],
   currentConversationId = null,
   onSelectConversation,
   onDeleteConversation,
 }: MainLayoutProps) => {
   const { user, logout } = useAuth();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  return (
-    <div className="flex h-screen w-full bg-zinc-50 dark:bg-brand-dark text-zinc-900 dark:text-zinc-100 overflow-hidden font-sans">
-      {/* Sidebar */}
-      <aside className="w-72 border-r border-zinc-200/50 dark:border-zinc-800/50 glass flex flex-col hidden md:flex z-30 relative">
-        <div className="absolute top-0 -left-20 w-40 h-screen bg-brand-cyan/5 blur-[100px] pointer-events-none" />
-        
-        <Link to="/chat" className="p-6 flex items-center gap-3 group">
-          <div className="p-2 rounded-xl bg-brand-cyan/10 group-hover:bg-brand-cyan/20 transition-colors">
-            <img src="/craft_logo.png" alt="GPTCraft" className="w-7 h-7 object-contain group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-xl tracking-tight leading-none text-glow-cyan">GPTCraft</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mt-1">Version 2.0</span>
-          </div>
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setDrawerOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drawerOpen]);
+
+  const displayName = user?.name || user?.email?.split('@')[0] || 'You';
+  const initial = displayName.charAt(0).toUpperCase();
+
+  const sidebar = (
+    <>
+      <div className="flex items-center justify-between px-5 pt-5 pb-4">
+        <Link to="/chat" className="flex items-center gap-2.5 rounded-lg" onClick={() => setDrawerOpen(false)}>
+          <img src="/craft_logo.png" alt="" className="h-7 w-7 object-contain" />
+          <span className="font-display text-[1.35rem] font-bold leading-none tracking-tight text-ink">GPTCraft</span>
         </Link>
-        
-        <div className="p-6">
-          <button 
-            onClick={onNewChat}
-            data-testid="new-conversation-button"
-            className="w-full flex items-center justify-center gap-2 bg-brand-cyan text-brand-dark px-4 py-3 rounded-2xl hover:bg-white transition-all font-bold text-sm shadow-xl shadow-brand-cyan/10 active:scale-95"
-          >
-            <Plus size={18} />
-            New Conversation
-          </button>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
-          <div className="px-4 py-2">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Recent History</span>
-          </div>
-          
-          {conversations.length === 0 && (
-            <div className="px-4 py-2 text-sm text-zinc-500">No recent conversations</div>
-          )}
-          
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(false)}
+          className="rounded-lg p-1.5 text-ink-3 hover:bg-sunken hover:text-ink md:hidden"
+          aria-label="Close menu"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="px-3 pb-3">
+        <button
+          onClick={() => {
+            onNewChat?.();
+            setDrawerOpen(false);
+          }}
+          data-testid="new-conversation-button"
+          className="flex w-full items-center gap-2.5 rounded-xl border border-line bg-raised px-3.5 py-2.5 text-sm font-medium text-ink shadow-lift transition-colors hover:border-line-strong active:translate-y-px"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded-md bg-ember text-on-ember">
+            <Plus size={14} strokeWidth={2.5} />
+          </span>
+          New conversation
+        </button>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Conversation history">
+        <h2 className="px-2.5 pt-3 pb-2 text-xs font-medium text-ink-3">Recent</h2>
+
+        {conversations.length === 0 && (
+          <p className="px-2.5 py-2 text-sm leading-relaxed text-ink-3">
+            Your conversations will appear here.
+          </p>
+        )}
+
+        <ul className="space-y-px">
           {conversations.map((conv) => {
             const isActive = currentConversationId === conv.id.toString();
             return (
-              <div key={conv.id} className="relative group/h flex items-center">
-                <button 
-                  onClick={() => onSelectConversation?.(conv.id.toString())}
+              <li key={conv.id} className="group/h relative flex items-center">
+                <button
+                  onClick={() => {
+                    onSelectConversation?.(conv.id.toString());
+                    setDrawerOpen(false);
+                  }}
                   data-testid={`conversation-item-${conv.id}`}
-                  className={`w-full text-left px-4 py-3 pr-10 rounded-2xl border flex items-center gap-3 text-sm font-medium transition-colors ${
-                    isActive 
-                      ? 'glass-card border-brand-cyan/30 text-brand-cyan' 
-                      : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-zinc-200'
-                  }`}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    'w-full truncate rounded-lg py-2 pr-9 pl-2.5 text-left text-sm transition-colors',
+                    isActive
+                      ? 'bg-raised font-medium text-ink shadow-lift'
+                      : 'text-ink-2 hover:bg-sunken hover:text-ink'
+                  )}
                 >
-                  <MessageSquare size={16} className="shrink-0" />
-                  <span className="truncate flex-1">{conv.title}</span>
+                  {conv.title}
                 </button>
                 {onDeleteConversation && (
                   <button
@@ -83,77 +107,108 @@ export const MainLayout = ({
                       e.stopPropagation();
                       onDeleteConversation(conv.id.toString());
                     }}
-                    className="absolute right-2 p-1.5 text-zinc-500 hover:text-red-400 rounded-lg opacity-0 group-hover/h:opacity-100 transition-opacity"
+                    className="absolute right-1.5 rounded-md p-1.5 text-ink-3 opacity-0 transition-opacity hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 group-hover/h:opacity-100"
                     title="Delete conversation"
+                    aria-label={`Delete ${conv.title}`}
                   >
                     <Trash2 size={14} />
                   </button>
                 )}
-              </div>
+              </li>
             );
           })}
+        </ul>
+      </nav>
+
+      <div className="space-y-3 border-t border-line p-3">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs font-medium text-ink-3">Appearance</span>
+          <ThemeSwitcher />
         </div>
 
-        <div className="p-6 border-t border-zinc-200/50 dark:border-zinc-800/50">
-          <div className="flex items-center justify-between p-3 rounded-2xl glass-card">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-gradient-cyan flex items-center justify-center text-brand-dark shrink-0 shadow-lg">
-                <UserIcon size={20} />
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="text-sm font-bold truncate leading-tight" data-testid="sidebar-user-name">
-                  {user?.name || user?.email?.split('@')[0]}
-                </div>
-                <Link 
-                  to="/subscription" 
-                  data-testid="manage-subscription-link"
-                  className="flex items-center gap-1.5 mt-0.5 group/plan cursor-pointer"
-                  title="Manage subscription"
-                >
-                  <div className="h-1.5 w-1.5 rounded-full bg-brand-cyan animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-brand-cyan group-hover/plan:text-white transition-colors" data-testid="sidebar-user-plan">
-                    {user?.plan || 'Free'}
-                  </span>
-                  <ShieldCheck size={10} className="text-brand-cyan/50 group-hover/plan:text-white transition-colors" />
-                </Link>
-              </div>
-            </div>
-            <button 
-              onClick={logout}
-              data-testid="logout-button"
-              className="p-2 text-zinc-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
-              title="Logout"
-            >
-              <LogOut size={18} />
-            </button>
+        <div className="flex items-center gap-3 rounded-xl p-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink font-display text-sm font-semibold text-canvas">
+            {initial}
           </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium leading-tight text-ink" data-testid="sidebar-user-name">
+              {displayName}
+            </div>
+            <Link
+              to="/subscription"
+              data-testid="manage-subscription-link"
+              className="group/plan mt-0.5 inline-flex items-center gap-1 text-xs text-ink-3 hover:text-ember"
+              title="Manage subscription"
+            >
+              <span className="capitalize" data-testid="sidebar-user-plan">{user?.plan || 'free'}</span>
+              <span>plan</span>
+              <ArrowUpRight size={12} className="opacity-70" />
+            </Link>
+          </div>
+          <button
+            onClick={logout}
+            data-testid="logout-button"
+            className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-danger-soft hover:text-danger"
+            title="Log out"
+            aria-label="Log out"
+          >
+            <LogOut size={17} />
+          </button>
         </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex h-dvh w-full overflow-hidden bg-canvas font-sans text-ink">
+      {/* Desktop sidebar */}
+      <aside className="relative z-30 hidden w-[17.5rem] shrink-0 flex-col border-r border-line bg-surface md:flex">
+        {sidebar}
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 relative">
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-cyan/5 blur-[120px] pointer-events-none" />
-        
-        {/* Mobile Header */}
-        <header className="md:hidden p-4 border-b border-zinc-200/50 dark:border-zinc-800/50 flex items-center justify-between glass sticky top-0 z-40">
+      {/* Mobile drawer */}
+      <div
+        className={cn(
+          'fixed inset-0 z-50 md:hidden',
+          drawerOpen ? 'pointer-events-auto' : 'pointer-events-none'
+        )}
+        aria-hidden={!drawerOpen}
+      >
+        <div
+          className={cn('absolute inset-0 bg-black/40 transition-opacity duration-300', drawerOpen ? 'opacity-100' : 'opacity-0')}
+          onClick={() => setDrawerOpen(false)}
+        />
+        <aside
+          className={cn(
+            'absolute inset-y-0 left-0 flex w-[85%] max-w-[19rem] flex-col bg-surface shadow-float transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]',
+            drawerOpen ? 'translate-x-0' : '-translate-x-full'
+          )}
+        >
+          {sidebar}
+        </aside>
+      </div>
+
+      <main className="relative flex min-w-0 flex-1 flex-col">
+        {/* Mobile header */}
+        <header className="sticky top-0 z-40 flex items-center justify-between border-b border-line bg-canvas px-3 py-2.5 md:hidden">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="rounded-lg p-2 text-ink-2 hover:bg-sunken"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
           <Link to="/chat" className="flex items-center gap-2">
-            <img src="/craft_logo.png" alt="GPTCraft" className="w-8 h-8 object-contain" />
-            <span className="font-bold text-xl tracking-tight text-glow-cyan">GPTCraft</span>
+            <img src="/craft_logo.png" alt="" className="h-6 w-6 object-contain" />
+            <span className="font-display text-lg font-bold tracking-tight text-ink">GPTCraft</span>
           </Link>
-          <div className="flex items-center gap-2">
-            <button onClick={onNewChat} className="p-2.5 rounded-xl bg-brand-cyan/10 text-brand-cyan" title="New Chat">
-              <Plus size={20} />
-            </button>
-            <button onClick={logout} className="p-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-500" title="Logout">
-              <LogOut size={20} />
-            </button>
-          </div>
+          <button onClick={onNewChat} className="rounded-lg p-2 text-ink-2 hover:bg-sunken" title="New chat" aria-label="New chat">
+            <Plus size={20} />
+          </button>
         </header>
 
-        {/* Page Content */}
-        <div className="flex-1 overflow-hidden relative flex flex-col">
-          {children}
-        </div>
+        <div className="relative flex flex-1 flex-col overflow-hidden">{children}</div>
       </main>
     </div>
   );

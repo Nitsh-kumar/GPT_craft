@@ -2,7 +2,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm, CRAFT_MODES
+from app.ai.llm import get_llm, CRAFT_MODES, LocalCraftLLM
 
 # Define tools here
 tools = []
@@ -22,7 +22,15 @@ def chatbot_node(state: AgentState, config: RunnableConfig):
     llm_with_tools = llm.bind_tools(tools) if tools else llm
 
     messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
-    response = llm_with_tools.invoke(messages)
+    try:
+        response = llm_with_tools.invoke(messages)
+    except Exception as exc:
+        err_str = str(exc).lower()
+        if "model" in err_str or "not found" in err_str or "decommissioned" in err_str or "connect" in err_str:
+            fallback = LocalCraftLLM(model_name=model_id or "gptcraft", mode=mode)
+            response = fallback.invoke(messages)
+        else:
+            raise exc
     return {"messages": [response]}
 
 

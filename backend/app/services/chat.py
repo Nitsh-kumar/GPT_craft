@@ -136,16 +136,25 @@ class ChatService:
     ) -> Generator[str, None, None]:
         """
         Server-Sent Events (SSE) generator for token-by-token streaming over HTTP.
+        Catches any runtime or upstream LLM errors and streams a structured error event
+        to prevent HTTP stream aborts / network connection resets.
         """
-        result = ChatService.process_chat(
-            message=message,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            user_tier=user_tier,
-            db=db,
-            model_id=model_id,
-            mode=mode,
-        )
+        try:
+            result = ChatService.process_chat(
+                message=message,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_tier=user_tier,
+                db=db,
+                model_id=model_id,
+                mode=mode,
+            )
+        except HTTPException as he:
+            yield f"data: {json.dumps({'type': 'error', 'error': he.detail})}\n\n"
+            return
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'error': f'Error generating AI response: {str(exc)}'})}\n\n"
+            return
 
         words = result.response.split(" ")
         for idx, word in enumerate(words):

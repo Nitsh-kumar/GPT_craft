@@ -14,14 +14,25 @@ build/
 dist/
 coverage/
 *.log
+test-results/
+playwright-report/
+frontend/test-results/
+frontend/playwright-report/
 
 # Environment Variables
 .env
-.env.*
-!.env.example
+
 !backend/.env.example
 !frontend/.env.example
 
 # OS / Editor
 .DS_Store
 Thumbs.db
+
+
+docs/screenshots/*
+docs/screenshots/**/*.png
+docs/screenshots/**/*.jpg
+docs/screenshots/**/*.jpeg
+docs/screenshots/**/*.gif
+docs/screenshots/**/*.svg

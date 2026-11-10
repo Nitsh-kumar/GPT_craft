@@ -4,7 +4,7 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 
 export const LoginForm = () => {
-  const { login, isLoading } = useAuth();
+  const { login, loginWithGoogle, isLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
@@ -14,16 +14,18 @@ export const LoginForm = () => {
   React.useEffect(() => {
     const errorParam = searchParams.get('error');
     const detailsParam = searchParams.get('details');
-    if (errorParam) {
-      if (errorParam === 'auth_failed') {
-        setError(detailsParam || 'Authentication failed. Please try again.');
+    if (errorParam || detailsParam) {
+      if (detailsParam) {
+        setError(detailsParam);
+      } else if (errorParam === 'auth_failed') {
+        setError('Authentication failed. Please try again.');
       } else if (errorParam === 'failed_to_get_user_info') {
         setError('Failed to get user information from Google.');
       } else if (errorParam === 'invalid_user_data_from_google') {
         setError('Google did not provide essential account information.');
       } else if (errorParam === 'session_creation_failed') {
         setError('Login successful, but we couldn\'t start your session.');
-      } else {
+      } else if (errorParam) {
         setError(errorParam.replace(/_/g, ' '));
       }
     }
@@ -41,23 +43,23 @@ export const LoginForm = () => {
   };
 
   return (
-    <div className="w-full max-w-md p-8 space-y-8 bg-zinc-900/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/10">
+    <div className="w-full max-w-md p-8 space-y-8 bg-surface rounded-2xl shadow-float border border-line">
       <div className="text-center">
         <img src="/craft_logo.png" alt="GPTCraft Logo" className="w-12 h-12 mx-auto object-contain mb-4" />
-        <h2 className="text-2xl font-bold text-white">Welcome back</h2>
-        <p className="text-zinc-400 mt-2">Please sign in to your account</p>
+        <h2 className="font-serif text-3xl font-medium tracking-tight text-ink">Welcome back</h2>
+        <p className="text-ink-2 mt-2">Please sign in to your account</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {error && (
-          <div className="p-3 text-sm text-red-400 bg-red-900/20 rounded-lg border border-red-900/50">
+          <div className="p-3 text-sm text-danger bg-danger-soft rounded-lg border border-danger/30">
             {error}
           </div>
         )}
 
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">
+            <label className="block text-sm font-medium text-ink-2 mb-1">
               Email address
             </label>
             <input
@@ -65,13 +67,13 @@ export const LoginForm = () => {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 outline-none transition-all text-white placeholder-zinc-600"
+              className="w-full px-4 py-2 bg-raised border border-line rounded-xl focus:border-ember focus:ring-2 focus:ring-ember/20 outline-none transition-all text-ink placeholder:text-ink-3"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1">
+            <label className="block text-sm font-medium text-ink-2 mb-1">
               Password
             </label>
             <input
@@ -79,7 +81,7 @@ export const LoginForm = () => {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 outline-none transition-all text-white placeholder-zinc-600"
+              className="w-full px-4 py-2 bg-raised border border-line rounded-xl focus:border-ember focus:ring-2 focus:ring-ember/20 outline-none transition-all text-ink placeholder:text-ink-3"
               placeholder="••••••••"
             />
           </div>
@@ -88,7 +90,7 @@ export const LoginForm = () => {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full flex items-center justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full flex items-center justify-center py-2.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-on-ember bg-ember hover:bg-ember-hover focus:outline-none focus:ring-2 focus:ring-ember/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? <Loader2 className="animate-spin" size={20} /> : 'Sign in'}
         </button>
@@ -96,19 +98,23 @@ export const LoginForm = () => {
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-white/10"></div>
+          <div className="w-full border-t border-line"></div>
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="px-2 bg-zinc-900 text-zinc-500">Or continue with</span>
+          <span className="px-2 bg-surface text-ink-3">Or continue with</span>
         </div>
       </div>
 
       <button
         type="button"
-        onClick={() => {
-          window.location.href = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/auth/google/login`;
+        onClick={async () => {
+          try {
+            await loginWithGoogle();
+          } catch (err: any) {
+            setError(err.message || 'Failed to start Google sign-in');
+          }
         }}
-        className="w-full flex items-center justify-center py-2.5 px-4 border border-white/10 rounded-lg shadow-sm text-sm font-medium text-white bg-white/5 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 transition-colors gap-3"
+        className="w-full flex items-center justify-center py-2.5 px-4 border border-line rounded-xl shadow-sm text-sm font-medium text-ink bg-raised hover:bg-sunken focus:outline-none focus:ring-2 focus:ring-ember/40 transition-colors gap-3"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24">
           <path
@@ -131,9 +137,9 @@ export const LoginForm = () => {
         Sign in with Google
       </button>
 
-      <p className="text-center text-sm text-zinc-400">
+      <p className="text-center text-sm text-ink-2">
         Don't have an account?{' '}
-        <Link to="/register" className="font-medium text-cyan-400 hover:text-cyan-300">
+        <Link to="/register" className="font-medium text-ember hover:underline">
           Sign up
         </Link>
       </p>

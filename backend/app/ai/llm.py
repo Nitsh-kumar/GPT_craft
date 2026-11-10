@@ -23,28 +23,28 @@ MODEL_CATALOG: List[Dict[str, str]] = [
         "name": "Llama 3 8B",
         "description": "Fast, efficient, and versatile for daily tasks.",
         "requiredPlan": "free",
-        "groq_model": "llama-3.1-8b-instant",
+        "groq_model": "openai/gpt-oss-20b",
     },
     {
         "id": "gemma-7b-it",
         "name": "Gemma 2 9B",
         "description": "Google-grade lightweight model optimization.",
         "requiredPlan": "free",
-        "groq_model": "gemma2-9b-it",
+        "groq_model": "qwen/qwen3.8-27b",
     },
     {
         "id": "mixtral-8x7b-32768",
         "name": "Mixtral 8x7B",
         "description": "Powerful mixture of experts for complex reasoning.",
         "requiredPlan": "super",
-        "groq_model": "llama-3.3-70b-versatile",
+        "groq_model": "qwen/qwen3.8-27b",
     },
     {
         "id": "llama3-70b-8192",
         "name": "Llama 3.3 70B",
         "description": "Groq's most capable reasoning and coding model.",
         "requiredPlan": "hyper",
-        "groq_model": "llama-3.3-70b-versatile",
+        "groq_model": "openai/gpt-oss-120b",
     },
 ]
 
@@ -129,9 +129,9 @@ def get_llm(tier: str = "free", model_id: Optional[str] = None, mode: str = "sta
         model_name = entry["groq_model"]
     else:
         model_name = (
-            "llama-3.3-70b-versatile"
+            "openai/gpt-oss-120b"
             if tier_lower in ("pro", "super", "hyper")
-            else "llama-3.1-8b-instant"
+            else "openai/gpt-oss-20b"
         )
 
     api_key = (settings.groq_api_key or "").strip()

@@ -38,9 +38,9 @@ def test_chat_stream_when_llm_fails_does_not_crash_connection():
     token = reg.json()["accessToken"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Simulate Groq 404 model_not_found error
-    with patch("app.services.chat.agent.invoke") as mock_invoke:
-        mock_invoke.side_effect = Exception("The model `llama-3.1-8b-instant` does not exist or you do not have access to it.")
+    # Simulate Groq 404 model_not_found error on the LangGraph streaming seam
+    with patch("app.services.chat.agent.stream") as mock_stream:
+        mock_stream.side_effect = Exception("The model `llama-3.1-8b-instant` does not exist or you do not have access to it.")
         
         # Test stream endpoint
         with client.stream(

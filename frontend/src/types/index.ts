@@ -41,3 +41,30 @@ export interface Model {
   description: string;
   requiredPlan: PlanType;
 }
+
+export type MemoryCategory = 'general' | 'tech_stack' | 'project' | 'preference';
+
+export interface UserPreferences {
+  userId: number;
+  customInstructionsProfile?: string | null;
+  customInstructionsStyle?: string | null;
+  memoryEnabled: boolean;
+  updatedAt?: string | null;
+}
+
+export interface UserMemoryItem {
+  id: number;
+  userId: number;
+  category: MemoryCategory;
+  content: string;
+  isActive: boolean;
+  sourceConversationId?: number | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface MemoryListResponse {
+  memories: UserMemoryItem[];
+  total: number;
+  memoryEnabled: boolean;
+}

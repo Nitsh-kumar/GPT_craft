@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ArrowUp, Square, ChevronDown, Lock, Cpu, Zap, Brain, Sparkles, Compass, Code2, Lightbulb, Check } from 'lucide-react';
 import { cn } from '../../utils/cn';
-import { CraftMode, Model, PlanType } from '../../types';
+import { CraftMode, Model, PlanType, UserPreferences } from '../../types';
+import { memoryService, PREFERENCES_UPDATED_EVENT } from '../../services/memoryService';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -45,8 +46,35 @@ export const ChatInput = ({
 }: ChatInputProps) => {
   const [input, setInput] = useState('');
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    memoryService
+      .getPreferences()
+      .then((prefs) => {
+        if (active && typeof prefs.memoryEnabled === 'boolean') {
+          setMemoryEnabled(prefs.memoryEnabled);
+        }
+      })
+      .catch(() => {
+        // Keep default on unauthenticated or offline init
+      });
+
+    const onPrefsUpdated = (e: Event) => {
+      const customEvent = e as CustomEvent<UserPreferences>;
+      if (customEvent.detail && typeof customEvent.detail.memoryEnabled === 'boolean') {
+        setMemoryEnabled(customEvent.detail.memoryEnabled);
+      }
+    };
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, onPrefsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener(PREFERENCES_UPDATED_EVENT, onPrefsUpdated);
+    };
+  }, []);
 
   const selected = models.find(m => m.id === selectedModel) || models[0];
 
@@ -226,7 +254,14 @@ export const ChatInput = ({
 
         <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-ink-3 font-mono">
           <span>Enter to send · Shift + Enter for new line</span>
-          <span className="max-sm:hidden">⚡ Groq LPU Engine</span>
+          {memoryEnabled ? (
+            <span className="flex items-center gap-1.5 max-sm:hidden" data-testid="memory-active-indicator">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-ember" />
+              <span>Memory & Personalization Active</span>
+            </span>
+          ) : (
+            <span className="max-sm:hidden" data-testid="memory-paused-indicator">⚡ Groq LPU Engine</span>
+          )}
         </div>
       </div>
     </div>

@@ -132,6 +132,13 @@ class LocalCraftLLM:
                 f"| **High Leverage** | Hybrid Memory Indexing | Very High | High |\n"
                 f"| **Moonshot** | Autonomous Goal Agents | Transformative | Medium |"
             )
+        elif self.mode == "agent":
+            reply += (
+                f"#### Agent Studio Execution Plan\n"
+                f"1. **Goal Analysis**: Scoped request within workspace boundaries.\n"
+                f"2. **Safety Policy**: Tier 1 read-only checks auto-approved; Tier 2/3 mutations gated by HITL.\n"
+                f"3. **Outcome**: Agent Studio protocol envelope ready for autonomous turn execution."
+            )
         else:
             reply += (
                 f"#### Core Insights\n"

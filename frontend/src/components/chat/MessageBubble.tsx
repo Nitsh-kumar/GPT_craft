@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Message, CraftMode } from '../../types';
 import { cn } from '../../utils/cn';
-import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb } from 'lucide-react';
+import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb, Bot } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -13,15 +13,22 @@ interface MessageBubbleProps {
 
 const getModeMeta = (mode?: CraftMode) => {
   switch (mode) {
+    case 'agent':
+      return {
+        label: 'Agent Studio',
+        badge: 'AGENT',
+        icon: <Bot size={12} className="text-accent" />,
+        pillClass: 'border-accent/35 bg-accent-soft text-accent',
+      };
     case 'architect':
-      return { label: 'Deep Architect', icon: <Compass size={12} className="text-blue-500" /> };
+      return { label: 'Deep Architect', icon: <Compass size={12} className="text-blue-500" />, pillClass: 'border-line bg-raised text-ink-3' };
     case 'code':
-      return { label: 'Code Craft', icon: <Code2 size={12} className="text-emerald-500" /> };
+      return { label: 'Code Craft', icon: <Code2 size={12} className="text-emerald-500" />, pillClass: 'border-line bg-raised text-ink-3' };
     case 'brainstorm':
-      return { label: 'Brainstorm', icon: <Lightbulb size={12} className="text-amber-500" /> };
+      return { label: 'Brainstorm', icon: <Lightbulb size={12} className="text-amber-500" />, pillClass: 'border-line bg-raised text-ink-3' };
     case 'standard':
     default:
-      return { label: 'Standard Craft', icon: <Sparkles size={12} className="text-accent" /> };
+      return { label: 'Standard Craft', icon: <Sparkles size={12} className="text-accent" />, pillClass: 'border-line bg-raised text-ink-3' };
   }
 };
 
@@ -36,7 +43,8 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
   };
 
   const time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const modeMeta = getModeMeta(modeName);
+  const effectiveMode = message.mode || modeName;
+  const modeMeta = getModeMeta(effectiveMode);
 
   if (isUser) {
     return (
@@ -56,7 +64,8 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
     );
   }
 
-  if (!message.content) return null;
+  const hasThoughts = Boolean(message.thoughts && message.thoughts.length > 0);
+  if (!message.content && !hasThoughts) return null;
 
   return (
     <div className="group flex w-full animate-in flex-col rounded-xl border border-line bg-surface/60 p-4 sm:p-5 shadow-lift transition-colors hover:border-line-strong">
@@ -72,9 +81,17 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
             <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-sunken border border-line text-ink-2">
               {modelName}
             </span>
-            <span className="inline-flex items-center gap-1 text-[11px] text-ink-3 font-medium px-1.5 py-0.5 rounded border border-line bg-raised">
+            <span
+              data-testid="message-mode-badge"
+              className={cn('inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded border', modeMeta.pillClass)}
+            >
               {modeMeta.icon}
               <span>{modeMeta.label}</span>
+              {modeMeta.badge && (
+                <span className="rounded bg-accent text-on-accent px-1 py-px font-mono text-[9px] font-semibold tracking-wider">
+                  {modeMeta.badge}
+                </span>
+              )}
             </span>
           </div>
         </div>
@@ -95,6 +112,21 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
           <time className="text-[11px] font-mono tabular-nums">{time}</time>
         </div>
       </div>
+
+      {/* Agent Thought Envelopes */}
+      {hasThoughts && (
+        <div
+          data-testid="agent-thought-trace"
+          className="mb-3 space-y-1 rounded-lg border border-line bg-sunken px-3 py-2 font-mono text-xs text-ink-2"
+        >
+          {message.thoughts!.map((thought, idx) => (
+            <div key={idx} className="flex items-start gap-2">
+              <Bot size={13} className="mt-0.5 shrink-0 text-accent" />
+              <span>{thought}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Structured Content Stream */}
       <div className="min-w-0 flex-1">

@@ -79,14 +79,17 @@ export const useChat = () => {
     }
   }, [currentConversationId]);
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, modeOverride?: CraftMode) => {
     if (!content.trim() || !selectedModel) return;
+
+    const activeMode = modeOverride ?? selectedMode;
 
     const newUserMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
+      mode: activeMode,
     };
 
     setMessages((prev) => [...prev, newUserMessage]);
@@ -99,6 +102,8 @@ export const useChat = () => {
       role: 'assistant',
       content: '',
       timestamp: new Date().toISOString(),
+      mode: activeMode,
+      thoughts: [],
     };
 
     setMessages((prev) => [...prev, newAssistantMessage]);
@@ -122,7 +127,18 @@ export const useChat = () => {
           );
         },
         abortControllerRef.current.signal,
-        selectedMode
+        activeMode,
+        (event) => {
+          if (event.type === 'thought') {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? { ...msg, thoughts: [...(msg.thoughts || []), event.thought] }
+                  : msg
+              )
+            );
+          }
+        }
       );
 
       if (!currentConversationId && result.conversationId) {

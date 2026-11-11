@@ -1,6 +1,32 @@
 export type PlanType = 'free' | 'super' | 'hyper';
 
-export type CraftMode = 'standard' | 'architect' | 'code' | 'brainstorm';
+export type CraftMode = 'standard' | 'architect' | 'code' | 'brainstorm' | 'agent';
+
+export type SseEventEnvelope =
+  | { type: 'thought'; thought: string }
+  | { type: 'token'; token: string }
+  | { type: 'action_call'; actionId: string; tool: string; args: Record<string, unknown>; tier: number }
+  | {
+      type: 'approval_required';
+      actionId: string;
+      tool: string;
+      tier: number;
+      parameters: Record<string, unknown>;
+      rationale: string;
+    }
+  | { type: 'action_result'; actionId: string; tool: string; output: string }
+  | { type: 'chunk'; content: string }
+  | {
+      type: 'done';
+      status?: string;
+      totalSteps?: number;
+      conversationId?: string;
+      tokensUsed?: number;
+      tokensRemaining?: number;
+      modelUsed?: string;
+      modeUsed?: string;
+    }
+  | { type: 'error'; error: string };
 
 export interface User {
   id: string | number;
@@ -20,6 +46,8 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  mode?: CraftMode;
+  thoughts?: string[];
 }
 
 export interface Quota {

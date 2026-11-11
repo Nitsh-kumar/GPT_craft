@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 import { apiFetch, getAuthToken } from './api';
-import { CraftMode, Message, Quota, Model } from '../types';
+import { CraftMode, Message, Quota, Model, SseEventEnvelope } from '../types';
+import { parseSseBuffer } from '../utils/sseParser';
 
 export const chatService = {
   getModels: async (): Promise<Model[]> => {
@@ -59,7 +60,8 @@ export const chatService = {
     messages: Message[],
     onChunk: (chunk: string) => void,
     signal: AbortSignal,
-    mode: CraftMode = 'standard'
+    mode: CraftMode = 'standard',
+    onEvent?: (event: SseEventEnvelope) => void
   ): Promise<{ conversationId: string }> => {
     const token = getAuthToken();
     const baseUrl =
@@ -106,33 +108,24 @@ export const chatService = {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        const decoded = done ? decoder.decode() : decoder.decode(value, { stream: true });
+        const { events, remaining } = parseSseBuffer(buffer, decoded, done);
+        buffer = remaining;
 
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          let event: any;
-          try {
-            event = JSON.parse(jsonStr);
-          } catch {
-            // ignore malformed SSE frame
-            continue;
-          }
-
-          if (event.type === 'chunk' && typeof event.content === 'string') {
+        for (const event of events) {
+          onEvent?.(event);
+          if (event.type === 'chunk') {
             onChunk(event.content);
-          } else if (event.type === 'done' && event.conversation_id) {
-            resolvedConversationId = event.conversation_id.toString();
+          } else if (event.type === 'token') {
+            onChunk(event.token);
+          } else if (event.type === 'done' && event.conversationId) {
+            resolvedConversationId = event.conversationId;
           } else if (event.type === 'error') {
-            throw new Error(event.error || 'Server error during generation');
+            throw new Error(event.error);
           }
         }
+
+        if (done) break;
       }
     }
 

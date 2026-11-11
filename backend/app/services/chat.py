@@ -185,6 +185,24 @@ class ChatService:
         )
 
     @staticmethod
+    def _format_sse_event(event_type: Optional[str], payload: dict) -> str:
+        if event_type:
+            return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+        return f"data: {json.dumps(payload)}\n\n"
+
+    @staticmethod
+    def _format_sse_error(is_agent_mode: bool, detail: str) -> str:
+        if is_agent_mode:
+            return ChatService._format_sse_event("error", {"error": detail})
+        return ChatService._format_sse_event(None, {"type": "error", "error": detail})
+
+    @staticmethod
+    def _format_token_chunk(is_agent_mode: bool, chunk_text: str) -> str:
+        if is_agent_mode:
+            return ChatService._format_sse_event("token", {"token": chunk_text})
+        return ChatService._format_sse_event(None, {"type": "chunk", "content": chunk_text})
+
+    @staticmethod
     def stream_chat(
         message: str,
         conversation_id: Optional[int],
@@ -196,9 +214,11 @@ class ChatService:
     ) -> Generator[str, None, None]:
         """
         True Server-Sent Events (SSE) token generator routed through the LangGraph agent.
-        Streams chunks in real-time as tokens are emitted by the LLM node.
+        Emits typed SSE event envelopes (thought, token, done) in Agent Studio mode while
+        preserving legacy chunk/done/error frames for conversational modes.
         """
         effective_mode = (mode or "standard").lower()
+        is_agent_mode = effective_mode == "agent"
 
         try:
             conv_id, formatted_history, user_instructions, relevant_memories = ChatService._validate_policy_and_prepare(
@@ -210,25 +230,28 @@ class ChatService:
                 model_id=model_id,
             )
         except HTTPException as he:
-            yield f"data: {json.dumps({'type': 'error', 'error': he.detail})}\n\n"
+            yield ChatService._format_sse_error(is_agent_mode, he.detail)
             return
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'error': f'Error generating AI response: {str(exc)}'})}\n\n"
+            yield ChatService._format_sse_error(is_agent_mode, f"Error generating AI response: {str(exc)}")
             return
 
-        input_state = {
-            "messages": formatted_history,
-            "user_instructions": user_instructions,
-            "relevant_memories": relevant_memories,
-        }
-        config = {
-            "configurable": {
-                "user_id": user_id,
-                "user_tier": user_tier,
-                "model_id": model_id,
-                "mode": effective_mode,
-            }
-        }
+        input_state, config = ChatService._build_agent_invocation(
+            formatted_history,
+            user_instructions,
+            relevant_memories,
+            user_id,
+            user_tier,
+            model_id,
+            effective_mode,
+        )
+
+        if is_agent_mode:
+            active_model = model_id or "llama3-8b-8192"
+            yield ChatService._format_sse_event(
+                "thought",
+                {"thought": f"Analyzing goal in Agent Studio mode ({active_model})..."},
+            )
 
         accumulated_chunks = []
         try:
@@ -240,15 +263,15 @@ class ChatService:
 
                 if isinstance(msg_obj, AIMessageChunk):
                     accumulated_chunks.append(content)
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+                    yield ChatService._format_token_chunk(is_agent_mode, content)
                 elif isinstance(msg_obj, AIMessage):
                     words = content.split(" ")
                     for idx, word in enumerate(words):
                         chunk_str = (" " if idx > 0 else "") + word
                         accumulated_chunks.append(chunk_str)
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_str})}\n\n"
+                        yield ChatService._format_token_chunk(is_agent_mode, chunk_str)
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'error': f'Error generating AI response: {str(exc)}'})}\n\n"
+            yield ChatService._format_sse_error(is_agent_mode, f"Error generating AI response: {str(exc)}")
             return
 
         response_content = "".join(accumulated_chunks)
@@ -263,12 +286,26 @@ class ChatService:
             tokens_used=tokens_used,
         )
 
+        resolved_model = model_id or "llama3-8b-8192"
+        if is_agent_mode:
+            done_envelope = {
+                "status": "completed",
+                "totalSteps": 1,
+                "conversationId": conv_id,
+                "tokensUsed": tokens_used,
+                "tokensRemaining": tokens_remaining,
+                "modelUsed": resolved_model,
+                "modeUsed": effective_mode,
+            }
+            yield ChatService._format_sse_event("done", done_envelope)
+            return
+
         done_payload = {
             "type": "done",
             "conversation_id": conv_id,
             "tokens_used": tokens_used,
             "tokens_remaining": tokens_remaining,
-            "model_used": model_id or "llama3-8b-8192",
+            "model_used": resolved_model,
             "mode_used": effective_mode,
         }
-        yield f"data: {json.dumps(done_payload)}\n\n"
+        yield ChatService._format_sse_event(None, done_payload)

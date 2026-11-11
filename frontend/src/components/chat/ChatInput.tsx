@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowUp, Square, ChevronDown, Lock, Cpu, Zap, Brain, Sparkles, Compass, Code2, Lightbulb, Check } from 'lucide-react';
+import { ArrowUp, Square, ChevronDown, Lock, Cpu, Zap, Brain, Sparkles, Compass, Code2, Lightbulb, Check, Bot } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { CraftMode, Model, PlanType, UserPreferences } from '../../types';
 import { memoryService, PREFERENCES_UPDATED_EVENT } from '../../services/memoryService';
@@ -19,11 +19,12 @@ interface ChatInputProps {
 
 const planHierarchy: Record<PlanType, number> = { free: 0, super: 1, hyper: 2 };
 
-const craftModes: { id: CraftMode; label: string; icon: React.ReactNode }[] = [
+const craftModes: { id: CraftMode; label: string; icon: React.ReactNode; badge?: string }[] = [
   { id: 'standard', label: 'Standard', icon: <Sparkles size={12} /> },
   { id: 'architect', label: 'Deep Architect', icon: <Compass size={12} /> },
   { id: 'code', label: 'Code Craft', icon: <Code2 size={12} /> },
   { id: 'brainstorm', label: 'Brainstorm', icon: <Lightbulb size={12} /> },
+  { id: 'agent', label: 'Agent Studio', icon: <Bot size={12} />, badge: 'STUDIO' },
 ];
 
 const getModelIcon = (modelId: string, size = 14) => {
@@ -127,7 +128,7 @@ export const ChatInput = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? "You've used today's quota. Upgrade or come back tomorrow." : `Message ${selected?.name || 'GPTCraft'}…`}
+            placeholder={disabled ? "You've used today's quota. Upgrade or come back tomorrow." : selectedMode === 'agent' ? 'Assign a workspace task or goal for Agent Studio…' : `Message ${selected?.name || 'GPTCraft'}…`}
             disabled={disabled || isGenerating}
             className="m-0 block max-h-52 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-4 pb-2 text-[0.95rem] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus:ring-0 focus-visible:outline-none"
             rows={1}
@@ -201,6 +202,7 @@ export const ChatInput = ({
               <div className="flex items-center gap-0.5 overflow-x-auto" role="group" aria-label="Craft Mode">
                 {craftModes.map((m) => {
                   const active = selectedMode === m.id;
+                  const isAgent = m.id === 'agent';
                   return (
                     <button
                       key={m.id}
@@ -211,11 +213,28 @@ export const ChatInput = ({
                       onClick={() => setSelectedMode(m.id)}
                       className={cn(
                         'flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
-                        active ? 'bg-ember-soft text-ember' : 'text-ink-3 hover:bg-sunken hover:text-ink'
+                        isAgent
+                          ? active
+                            ? 'border border-accent/40 bg-accent-soft text-accent shadow-lift'
+                            : 'border border-accent/25 bg-sunken text-ink-2 hover:border-accent/45 hover:bg-accent-soft hover:text-accent'
+                          : active
+                            ? 'bg-ember-soft text-ember'
+                            : 'text-ink-3 hover:bg-sunken hover:text-ink'
                       )}
                     >
                       {m.icon}
-                      <span className={cn(!active && 'max-md:hidden')}>{m.label}</span>
+                      <span className={cn(!active && !isAgent && 'max-md:hidden')}>{m.label}</span>
+                      {m.badge && (
+                        <span
+                          data-testid="agent-mode-badge"
+                          className={cn(
+                            'rounded px-1 py-px font-mono text-[9px] font-semibold uppercase tracking-wider',
+                            active ? 'bg-accent text-on-accent' : 'bg-accent-soft text-accent'
+                          )}
+                        >
+                          {m.badge}
+                        </span>
+                      )}
                     </button>
                   );
                 })}

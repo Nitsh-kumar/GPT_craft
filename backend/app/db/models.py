@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Date
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -39,6 +39,8 @@ class User(Base):
 
     plan = relationship("Plans", back_populates="users")
     oauth_accounts = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
+    preferences = relationship("UserPreferences", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    memories = relationship("UserMemory", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email})>"
@@ -112,3 +114,41 @@ class Message(Base):
 
     def __repr__(self):
         return f"<Message(id={self.id}, role='{self.role}')>"
+
+
+class UserPreferences(Base):
+    """User personalization and custom instructions model"""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, index=True, nullable=False)
+    custom_instructions_profile = Column(Text, nullable=True)  # What the AI should know about the user
+    custom_instructions_style = Column(Text, nullable=True)    # How the AI should respond
+    memory_enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="preferences")
+
+    def __repr__(self):
+        return f"<UserPreferences(user_id={self.user_id}, memory_enabled={self.memory_enabled})>"
+
+
+class UserMemory(Base):
+    """Durable episodic memory fact stored for a user"""
+    __tablename__ = "user_memories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    category = Column(String, nullable=False, default="general")  # 'tech_stack', 'preference', 'project', 'general'
+    content = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    source_conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="memories")
+    source_conversation = relationship("Conversation")
+
+    def __repr__(self):
+        return f"<UserMemory(id={self.id}, user_id={self.user_id}, category='{self.category}')>"

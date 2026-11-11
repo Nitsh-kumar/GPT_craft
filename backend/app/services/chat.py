@@ -1,13 +1,14 @@
 import json
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
 from typing import Optional, Generator
 from app.db.crud_token import TokenUsageCRUD
 from app.db.crud_chat import ChatCRUD
 from app.schemas.chat import ChatResponse
 from app.ai.graph.agent import agent
 from app.ai.llm import ALLOWED_MODELS, PLAN_QUOTAS, is_tier_allowed
+from app.services.memory import MemoryService
 
 
 class ChatService:
@@ -53,6 +54,15 @@ class ChatService:
 
         ChatCRUD.add_message(db, conversation_id, "user", message)
 
+        # Retrieve active user preferences and relevant memories for AgentState
+        prefs = MemoryService.get_preferences(db, user_id)
+        user_instructions = MemoryService.format_user_instructions(prefs)
+        relevant_memories = (
+            MemoryService.get_relevant_memories(db, user_id, message, limit=5)
+            if prefs.memory_enabled
+            else []
+        )
+
         history = ChatCRUD.get_messages_for_conversation(db, conversation_id)
         formatted_history = []
         for msg in history:
@@ -61,7 +71,51 @@ class ChatService:
             else:
                 formatted_history.append(AIMessage(content=msg.content))
 
-        return conversation_id, formatted_history
+        return conversation_id, formatted_history, user_instructions, relevant_memories
+
+    @staticmethod
+    def _build_agent_invocation(
+        formatted_history: list,
+        user_instructions: str,
+        relevant_memories: list[str],
+        user_id: int,
+        user_tier: str,
+        model_id: Optional[str],
+        effective_mode: str,
+    ) -> tuple[dict, dict]:
+        input_state = {
+            "messages": formatted_history,
+            "user_instructions": user_instructions,
+            "relevant_memories": relevant_memories,
+        }
+        config = {
+            "configurable": {
+                "user_id": user_id,
+                "user_tier": user_tier,
+                "model_id": model_id,
+                "mode": effective_mode,
+            }
+        }
+        return input_state, config
+
+    @staticmethod
+    def _finalize_turn(
+        db: Session,
+        user_id: int,
+        conversation_id: int,
+        user_message: str,
+        response_content: str,
+        tokens_used: int,
+    ) -> int:
+        ChatCRUD.add_message(db, conversation_id, "assistant", response_content)
+        updated_limit = TokenUsageCRUD.deduct_tokens(db, user_id, tokens_used)
+        MemoryService.persist_extracted_memories(
+            db=db,
+            user_id=user_id,
+            message=user_message,
+            conversation_id=conversation_id,
+        )
+        return updated_limit.daily_limit
 
     @staticmethod
     def process_chat(
@@ -73,20 +127,20 @@ class ChatService:
         model_id: Optional[str] = None,
         mode: Optional[str] = "standard",
     ) -> ChatResponse:
-        conv_id, formatted_history = ChatService._validate_policy_and_prepare(
+        conv_id, formatted_history, user_instructions, relevant_memories = ChatService._validate_policy_and_prepare(
             message, conversation_id, user_id, user_tier, db, model_id=model_id
         )
 
         effective_mode = (mode or "standard").lower()
-        input_state = {"messages": formatted_history}
-        config = {
-            "configurable": {
-                "user_id": user_id,
-                "user_tier": user_tier,
-                "model_id": model_id,
-                "mode": effective_mode,
-            }
-        }
+        input_state, config = ChatService._build_agent_invocation(
+            formatted_history,
+            user_instructions,
+            relevant_memories,
+            user_id,
+            user_tier,
+            model_id,
+            effective_mode,
+        )
 
         try:
             result = agent.invoke(input_state, config=config)
@@ -112,13 +166,19 @@ class ChatService:
                 detail=f"Error generating AI response: {str(e)}",
             )
 
-        ChatCRUD.add_message(db, conv_id, "assistant", response_content)
-        updated_limit = TokenUsageCRUD.deduct_tokens(db, user_id, tokens_used)
+        tokens_remaining = ChatService._finalize_turn(
+            db=db,
+            user_id=user_id,
+            conversation_id=conv_id,
+            user_message=message,
+            response_content=response_content,
+            tokens_used=tokens_used,
+        )
 
         return ChatResponse(
             response=response_content,
             tokens_used=tokens_used,
-            tokens_remaining=updated_limit.daily_limit,
+            tokens_remaining=tokens_remaining,
             conversation_id=conv_id,
             model_used=model_id or "llama3-8b-8192",
             mode_used=effective_mode,
@@ -135,19 +195,19 @@ class ChatService:
         mode: Optional[str] = "standard",
     ) -> Generator[str, None, None]:
         """
-        Server-Sent Events (SSE) generator for token-by-token streaming over HTTP.
-        Catches any runtime or upstream LLM errors and streams a structured error event
-        to prevent HTTP stream aborts / network connection resets.
+        True Server-Sent Events (SSE) token generator routed through the LangGraph agent.
+        Streams chunks in real-time as tokens are emitted by the LLM node.
         """
+        effective_mode = (mode or "standard").lower()
+
         try:
-            result = ChatService.process_chat(
+            conv_id, formatted_history, user_instructions, relevant_memories = ChatService._validate_policy_and_prepare(
                 message=message,
                 conversation_id=conversation_id,
                 user_id=user_id,
                 user_tier=user_tier,
                 db=db,
                 model_id=model_id,
-                mode=mode,
             )
         except HTTPException as he:
             yield f"data: {json.dumps({'type': 'error', 'error': he.detail})}\n\n"
@@ -156,17 +216,59 @@ class ChatService:
             yield f"data: {json.dumps({'type': 'error', 'error': f'Error generating AI response: {str(exc)}'})}\n\n"
             return
 
-        words = result.response.split(" ")
-        for idx, word in enumerate(words):
-            chunk = (" " if idx > 0 else "") + word
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        input_state = {
+            "messages": formatted_history,
+            "user_instructions": user_instructions,
+            "relevant_memories": relevant_memories,
+        }
+        config = {
+            "configurable": {
+                "user_id": user_id,
+                "user_tier": user_tier,
+                "model_id": model_id,
+                "mode": effective_mode,
+            }
+        }
+
+        accumulated_chunks = []
+        try:
+            for item in agent.stream(input_state, config=config, stream_mode="messages"):
+                msg_obj = item[0] if isinstance(item, tuple) else item
+                content = getattr(msg_obj, "content", "")
+                if not content:
+                    continue
+
+                if isinstance(msg_obj, AIMessageChunk):
+                    accumulated_chunks.append(content)
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+                elif isinstance(msg_obj, AIMessage):
+                    words = content.split(" ")
+                    for idx, word in enumerate(words):
+                        chunk_str = (" " if idx > 0 else "") + word
+                        accumulated_chunks.append(chunk_str)
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk_str})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'error': f'Error generating AI response: {str(exc)}'})}\n\n"
+            return
+
+        response_content = "".join(accumulated_chunks)
+        tokens_used = len(message.split()) + len(response_content.split())
+
+        tokens_remaining = ChatService._finalize_turn(
+            db=db,
+            user_id=user_id,
+            conversation_id=conv_id,
+            user_message=message,
+            response_content=response_content,
+            tokens_used=tokens_used,
+        )
 
         done_payload = {
             "type": "done",
-            "conversation_id": result.conversation_id,
-            "tokens_used": result.tokens_used,
-            "tokens_remaining": result.tokens_remaining,
-            "model_used": result.model_used,
-            "mode_used": result.mode_used,
+            "conversation_id": conv_id,
+            "tokens_used": tokens_used,
+            "tokens_remaining": tokens_remaining,
+            "model_used": model_id or "llama3-8b-8192",
+            "mode_used": effective_mode,
         }
         yield f"data: {json.dumps(done_payload)}\n\n"

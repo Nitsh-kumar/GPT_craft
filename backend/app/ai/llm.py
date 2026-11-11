@@ -1,7 +1,8 @@
-from typing import Optional, Dict, Any, List
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from typing import Optional, Dict, Any, List, Generator
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, SystemMessage
 from langchain_groq import ChatGroq
 from app.core.config import get_settings
+from app.ai.prompts import MASTER_PROMPTS, MODE_TEMPERATURES
 
 PLAN_HIERARCHY = {
     "free": 0,
@@ -50,64 +51,115 @@ MODEL_CATALOG: List[Dict[str, str]] = [
 
 ALLOWED_MODELS = {m["id"]: m for m in MODEL_CATALOG}
 
-CRAFT_MODES: Dict[str, str] = {
-    "standard": (
-        "You are GPTCraft, an intelligent thinking partner. Provide clear, accurate, "
-        "and well-structured markdown responses."
-    ),
-    "architect": (
-        "You are GPTCraft in Deep Architect Mode. Break complex problems down into "
-        "system architecture, trade-offs, data flow, and clean production-grade code."
-    ),
-    "code": (
-        "You are GPTCraft in Code Craft Mode. Prioritize clean, idiomatic, well-typed "
-        "code with concise explanations and edge-case handling."
-    ),
-    "brainstorm": (
-        "You are GPTCraft in Creative Brainstorm Mode. Generate high-leverage ideas, "
-        "unique angles, structured comparisons, and actionable next steps."
-    ),
-}
+# Production Craft Mode Prompts
+CRAFT_MODES: Dict[str, str] = MASTER_PROMPTS
 
 
 class LocalCraftLLM:
     """
     Deterministic local fallback responder used when GROQ_API_KEY is not configured
     or set to a placeholder in local development / E2E browser testing.
-    Supports `.bind_tools()` and `.invoke()` matching LangChain ChatModel interface.
+    Supports `.bind_tools()`, `.invoke()`, and `.stream()` matching LangChain ChatModel interface.
     """
 
     def __init__(self, model_name: str, mode: str = "standard"):
         self.model_name = model_name
-        self.mode = mode
+        self.mode = mode.lower()
 
     def bind_tools(self, tools: list):
         return self
 
+    def _generate_content(self, messages: List[BaseMessage]) -> str:
+        last_user = ""
+        system_text = ""
+        for msg in messages:
+            if msg.type == "system":
+                system_text = str(msg.content)
+            elif msg.type == "human":
+                last_user = str(msg.content)
+
+        mode_label = self.mode.capitalize()
+        has_memory = "User Personalization & Persistent Context" in system_text
+
+        reply = (
+            f"### GPTCraft ({mode_label} Mode • `{self.model_name}`)\n\n"
+            f"I processed your request: **\"{last_user[:120]}\"**\n\n"
+        )
+
+        if has_memory:
+            context_snippet = system_text.split("## User Personalization & Persistent Context", 1)[1]
+            context_snippet = context_snippet.split("### Behavioral Personalization Rules:", 1)[0].strip()
+            reply += (
+                f"> **Personalization Active**: Applied your custom instructions and persistent memory "
+                f"to tailor this response.\n\n"
+                f"{context_snippet}\n\n"
+            )
+
+        if self.mode == "code":
+            reply += (
+                f"```python\n"
+                f"# Verified implementation tailored to your preferences\n"
+                f"def gptcraft_solution(query: str) -> dict:\n"
+                f"    return {{\n"
+                f"        'status': 'success',\n"
+                f"        'query': query,\n"
+                f"        'mode': 'code',\n"
+                f"        'personalized': {has_memory}\n"
+                f"    }}\n\n"
+                f"if __name__ == '__main__':\n"
+                f"    print(gptcraft_solution('{last_user[:30]}'))\n"
+                f"```"
+            )
+        elif self.mode == "architect":
+            reply += (
+                f"#### System Architecture & Flow\n"
+                f"```mermaid\n"
+                f"flowchart TD\n"
+                f"    Client[User Client] --> API[FastAPI Gateway]\n"
+                f"    API --> Memory[Memory & Relevance Engine]\n"
+                f"    API --> LLM[LangGraph Orchestration]\n"
+                f"    LLM --> Client\n"
+                f"```\n\n"
+                f"- **Data Flow**: Low-latency retrieval with in-database token ranking.\n"
+                f"- **Fault Domain**: Self-contained with zero external cloud dependencies."
+            )
+        elif self.mode == "brainstorm":
+            reply += (
+                f"#### Strategic Opportunities\n"
+                f"| Vector | Opportunity | Impact | Feasibility |\n"
+                f"| :--- | :--- | :--- | :--- |\n"
+                f"| **Quick Win** | Dynamic Context Caching | High | Immediate |\n"
+                f"| **High Leverage** | Hybrid Memory Indexing | Very High | High |\n"
+                f"| **Moonshot** | Autonomous Goal Agents | Transformative | Medium |"
+            )
+        else:
+            reply += (
+                f"#### Core Insights\n"
+                f"- **Context Retention**: Multi-turn conversation state managed seamlessly via **LangGraph**.\n"
+                f"- **Adaptive Personalization**: Responses automatically calibrated to your active technical profile."
+            )
+
+        return reply
+
     def invoke(self, messages: List[BaseMessage]) -> AIMessage:
+        reply = self._generate_content(messages)
         last_user = ""
         for msg in reversed(messages):
             if msg.type == "human":
                 last_user = str(msg.content)
                 break
-
-        mode_label = self.mode.capitalize()
-        reply = (
-            f"### GPTCraft ({mode_label} Mode • `{self.model_name}`)\n\n"
-            f"I processed your request: **\"{last_user[:120]}\"**\n\n"
-            f"#### Key Architectural Insights\n"
-            f"- **Context Retention**: Multi-turn conversation state managed via **LangGraph**.\n"
-            f"- **Tier & Quota Policy**: Verified active plan and token budget.\n\n"
-            f"```python\n"
-            f"def gptcraft_pipeline(prompt: str, mode: str = '{self.mode}') -> dict:\n"
-            f"    return {{'status': 'verified', 'model': '{self.model_name}', 'mode': mode}}\n"
-            f"```"
-        )
-        tokens = max(24, len(last_user.split()) * 2 + 40)
+        tokens = max(24, len(last_user.split()) * 2 + len(reply.split()))
         return AIMessage(
             content=reply,
             response_metadata={"token_usage": {"total_tokens": tokens}},
         )
+
+    def stream(self, messages: List[BaseMessage]) -> Generator[AIMessageChunk, None, None]:
+        reply = self._generate_content(messages)
+        words = reply.split(" ")
+        for idx, word in enumerate(words):
+            chunk_content = (" " if idx > 0 else "") + word
+            yield AIMessageChunk(content=chunk_content)
 
 
 def is_tier_allowed(user_tier: str, required_tier: str) -> bool:
@@ -119,10 +171,11 @@ def is_tier_allowed(user_tier: str, required_tier: str) -> bool:
 def get_llm(tier: str = "free", model_id: Optional[str] = None, mode: str = "standard"):
     """
     Initialize and return the Groq LLM model (or LocalCraftLLM fallback if no real key is configured)
-    based on user tier, requested model_id, and Craft mode.
+    based on user tier, requested model_id, and Craft mode with calibrated temperature.
     """
     settings = get_settings()
     tier_lower = tier.lower()
+    mode_lower = (mode or "standard").lower()
 
     if model_id and model_id in ALLOWED_MODELS:
         entry = ALLOWED_MODELS[model_id]
@@ -143,11 +196,13 @@ def get_llm(tier: str = "free", model_id: Optional[str] = None, mode: str = "sta
     )
 
     if is_placeholder:
-        return LocalCraftLLM(model_name=model_id or model_name, mode=mode)
+        return LocalCraftLLM(model_name=model_id or model_name, mode=mode_lower)
+
+    temperature = MODE_TEMPERATURES.get(mode_lower, 0.7)
 
     return ChatGroq(
         groq_api_key=api_key,
         model=model_name,
-        temperature=0.7,
+        temperature=temperature,
         max_tokens=1024,
     )

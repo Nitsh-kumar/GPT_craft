@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # AI API Keys
     groq_api_key: Optional[str] = None
     
+    max_output_tokens: int = Field(default=1024, ge=1, le=4096)
+    generation_timeout_seconds: int = Field(default=60, ge=1, le=90)
+    chat_burst_limit: int = Field(default=10, ge=1, le=100)
+
     # Frontend URL (for CORS and OAuth redirects)
     frontend_url: str = "http://localhost:3000"
     

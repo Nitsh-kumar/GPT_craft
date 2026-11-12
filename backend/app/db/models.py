@@ -109,6 +109,48 @@ class Message(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="messages")
+    generation = relationship("GenerationDetails", back_populates="message", uselist=False,
+                              cascade="all, delete-orphan")
+
+    @property
+    def model_used(self):
+        return self.generation.model_used if self.generation else None
+
+    @property
+    def mode_used(self):
+        return self.generation.mode_used if self.generation else None
+
 
     def __repr__(self):
         return f"<Message(id={self.id}, role='{self.role}')>"
+
+
+class DailyQuota(Base):
+    """Durable UTC usage; independent of deletable conversation history."""
+    __tablename__ = "daily_quotas"
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    date = Column(Date, primary_key=True)
+    tokens_remaining = Column(Integer, nullable=False)
+    requests_used = Column(Integer, nullable=False, default=0)
+    burst_window = Column(Integer, nullable=False, default=0)
+    burst_count = Column(Integer, nullable=False, default=0)
+
+
+class QuotaReservation(Base):
+    __tablename__ = "quota_reservations"
+    id = Column(String(36), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    reserved_tokens = Column(Integer, nullable=False)
+    tokens_used = Column(Integer, nullable=True)
+    unfunded_tokens = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="pending")
+    expires_at = Column(Integer, nullable=False, index=True)
+
+
+class GenerationDetails(Base):
+    __tablename__ = "generation_details"
+    message_id = Column(Integer, ForeignKey("messages.id"), primary_key=True)
+    model_used = Column(String, nullable=False)
+    mode_used = Column(String, nullable=False)
+    message = relationship("Message", back_populates="generation")

@@ -20,6 +20,9 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
+  modelUsed?: string;
+  modeUsed?: CraftMode;
+  status?: 'streaming' | 'complete' | 'interrupted';
 }
 
 export interface Quota {
@@ -40,4 +43,20 @@ export interface Model {
   name: string;
   description: string;
   requiredPlan: PlanType;
+}
+
+// Existing HTTP history fields remain snake_case for compatibility.
+export interface ConversationResponse {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface HistoryMessage {
+  id: number;
+  role: Message['role'];
+  content: string;
+  created_at: string;
+  model_used?: string | null;
+  mode_used?: CraftMode | null;
 }

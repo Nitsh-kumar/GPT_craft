@@ -1,172 +1,136 @@
-import json
-from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
-from langchain_core.messages import HumanMessage, AIMessage
-from typing import Optional, Generator
-from app.db.crud_token import TokenUsageCRUD
-from app.db.crud_chat import ChatCRUD
-from app.schemas.chat import ChatResponse
+"""Conversation admission, generation, and durable usage settlement."""
+import asyncio
+import logging
+from contextlib import aclosing
+from dataclasses import dataclass, field
+from uuid import uuid4
+
+import anyio
+from fastapi import HTTPException
+from langchain_core.messages import AIMessage, HumanMessage
+from starlette.concurrency import run_in_threadpool
+
 from app.ai.graph.agent import agent
-from app.ai.llm import ALLOWED_MODELS, PLAN_QUOTAS, is_tier_allowed
+from app.ai.llm import CRAFT_MODES, resolve_model
+from app.core.config import get_settings
+from app.db.crud_chat import ChatCRUD
+from app.db.crud_token import TokenUsageCRUD, AssistantReply
+from app.db.session import SessionLocal
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PreparedChat:
+    conversation_id: int
+    reservation_id: str
+    messages: list
+    model: str
+    mode: str
+    tier: str
+    cancel: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+def prompt_bound(messages, mode):
+    # Byte-level upper bound with generous per-message framing overhead. Reserve
+    # all history + system instructions + maximum output, not just the new text.
+    return (len(CRAFT_MODES[mode].encode("utf-8")) + 64
+            + sum(len(str(m.content).encode("utf-8")) + 64 for m in messages)
+            + get_settings().max_output_tokens)
 
 
 class ChatService:
     @staticmethod
-    def _validate_policy_and_prepare(
-        message: str,
-        conversation_id: Optional[int],
-        user_id: int,
-        user_tier: str,
-        db: Session,
-        model_id: Optional[str] = None,
-    ):
-        tier_lower = (user_tier or "free").lower()
-        default_tokens = PLAN_QUOTAS.get(tier_lower, PLAN_QUOTAS["free"])["tokens"]
-
-        user_limit = TokenUsageCRUD.get_user_limit(db, user_id)
-        if not user_limit:
-            user_limit = TokenUsageCRUD.create_user_limit(db, user_id, initial_limit=default_tokens)
-
-        if user_limit.daily_limit <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Daily token limit exceeded",
-            )
-
-        # Enforce model tier lock if a known model_id is requested
-        if model_id and model_id in ALLOWED_MODELS:
-            required_plan = ALLOWED_MODELS[model_id]["requiredPlan"]
-            if not is_tier_allowed(tier_lower, required_plan):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Model '{model_id}' requires the '{required_plan}' plan.",
-                )
-
-        if not conversation_id:
-            title = message[:30] + "..." if len(message) > 30 else message
-            conversation = ChatCRUD.create_conversation(db, user_id, title)
-            conversation_id = conversation.id
-        else:
+    def prepare(message, conversation_id, user_id, user_tier, db, model_id=None,
+                mode="standard", request_id=None):
+        model = resolve_model(user_tier, model_id)
+        mode = (mode or "standard").lower()
+        if mode not in CRAFT_MODES:
+            raise HTTPException(422, "Unknown Craft Mode")
+        history = []
+        if conversation_id is not None:
             conversation = ChatCRUD.get_conversation(db, conversation_id)
             if not conversation or conversation.user_id != user_id:
-                raise HTTPException(status_code=404, detail="Conversation not found")
-
-        ChatCRUD.add_message(db, conversation_id, "user", message)
-
-        history = ChatCRUD.get_messages_for_conversation(db, conversation_id)
-        formatted_history = []
-        for msg in history:
-            if msg.role == "user":
-                formatted_history.append(HumanMessage(content=msg.content))
-            else:
-                formatted_history.append(AIMessage(content=msg.content))
-
-        return conversation_id, formatted_history
-
-    @staticmethod
-    def process_chat(
-        message: str,
-        conversation_id: Optional[int],
-        user_id: int,
-        user_tier: str,
-        db: Session,
-        model_id: Optional[str] = None,
-        mode: Optional[str] = "standard",
-    ) -> ChatResponse:
-        conv_id, formatted_history = ChatService._validate_policy_and_prepare(
-            message, conversation_id, user_id, user_tier, db, model_id=model_id
-        )
-
-        effective_mode = (mode or "standard").lower()
-        input_state = {"messages": formatted_history}
-        config = {
-            "configurable": {
-                "user_id": user_id,
-                "user_tier": user_tier,
-                "model_id": model_id,
-                "mode": effective_mode,
-            }
-        }
-
+                raise HTTPException(404, "Conversation not found")
+            history = ChatCRUD.get_messages_for_conversation(db, conversation_id)
+        messages = [HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content)
+                    for m in history]
+        messages.append(HumanMessage(content=message))
+        reservation = TokenUsageCRUD.reserve(db, user_id, user_tier,
+                                             prompt_bound(messages, mode), request_id or str(uuid4()))
         try:
-            result = agent.invoke(input_state, config=config)
-            final_message = result["messages"][-1]
-            response_content = final_message.content
-
-            tokens_used = 0
-            if hasattr(final_message, "response_metadata") and final_message.response_metadata:
-                token_usage = final_message.response_metadata.get("token_usage", {})
-                tokens_used = token_usage.get("total_tokens", 0)
-
-            if tokens_used <= 0 and hasattr(final_message, "usage_metadata") and final_message.usage_metadata:
-                tokens_used = final_message.usage_metadata.get("total_tokens", 0)
-
-            if tokens_used <= 0:
-                tokens_used = len(message.split()) + len(response_content.split())
-
-        except HTTPException:
+            if conversation_id is None:
+                conversation = ChatCRUD.create_conversation(db, user_id,
+                                  message[:30] + ("..." if len(message) > 30 else ""))
+                conversation_id = conversation.id
+            ChatCRUD.add_message(db, conversation_id, "user", message)
+            db.commit()
+        except Exception:
+            db.rollback()
+            TokenUsageCRUD.finish(db, reservation, outcome="failed", tokens_used=0)
             raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error generating AI response: {str(e)}",
-            )
-
-        ChatCRUD.add_message(db, conv_id, "assistant", response_content)
-        updated_limit = TokenUsageCRUD.deduct_tokens(db, user_id, tokens_used)
-
-        return ChatResponse(
-            response=response_content,
-            tokens_used=tokens_used,
-            tokens_remaining=updated_limit.daily_limit,
-            conversation_id=conv_id,
-            model_used=model_id or "llama3-8b-8192",
-            mode_used=effective_mode,
-        )
+        return PreparedChat(conversation_id, reservation, messages, model, mode, user_tier)
 
     @staticmethod
-    def stream_chat(
-        message: str,
-        conversation_id: Optional[int],
-        user_id: int,
-        user_tier: str,
-        db: Session,
-        model_id: Optional[str] = None,
-        mode: Optional[str] = "standard",
-    ) -> Generator[str, None, None]:
-        """
-        Server-Sent Events (SSE) generator for token-by-token streaming over HTTP.
-        Catches any runtime or upstream LLM errors and streams a structured error event
-        to prevent HTTP stream aborts / network connection resets.
-        """
-        try:
-            result = ChatService.process_chat(
-                message=message,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                user_tier=user_tier,
-                db=db,
-                model_id=model_id,
-                mode=mode,
+    def _settle(prepared, outcome, tokens_used=None, text=None):
+        with SessionLocal() as db:
+            return TokenUsageCRUD.finish(
+                db, prepared.reservation_id, outcome=outcome, tokens_used=tokens_used,
+                assistant=AssistantReply(prepared.conversation_id, text, prepared.model, prepared.mode)
+                if outcome == "succeeded" else None,
             )
-        except HTTPException as he:
-            yield f"data: {json.dumps({'type': 'error', 'error': he.detail})}\n\n"
-            return
+
+    @staticmethod
+    async def events(prepared):
+        text = ""
+        total_usage = None
+        settled = False
+        config = {"configurable": {"user_tier": prepared.tier,
+                                   "model_id": prepared.model, "mode": prepared.mode,
+                                   "cancel_event": prepared.cancel}}
+        try:
+            yield {"type": "start", "conversation_id": prepared.conversation_id,
+                   "request_id": prepared.reservation_id, "model_used": prepared.model,
+                   "mode_used": prepared.mode}
+            async with asyncio.timeout(get_settings().generation_timeout_seconds):
+                async with aclosing(agent.astream({"messages": prepared.messages}, config=config,
+                                                   stream_mode="messages")) as chunks:
+                    async for chunk, _metadata in chunks:
+                        if isinstance(chunk.content, str) and chunk.content:
+                            text += chunk.content
+                            yield {"type": "chunk", "content": chunk.content}
+                        usage = getattr(chunk, "usage_metadata", None) or {}
+                        metadata = getattr(chunk, "response_metadata", None) or {}
+                        reported = usage.get("total_tokens") or metadata.get("token_usage", {}).get("total_tokens")
+                        if reported:
+                            total_usage = int(reported)
+            if not text:
+                raise RuntimeError("Provider returned no assistant text")
+            result = await run_in_threadpool(ChatService._settle, prepared, "succeeded", total_usage, text)
+            if result is None:
+                raise RuntimeError("Reservation already settled or expired")
+            settled = True
+            charged, remaining = result
+            yield {"type": "done", "conversation_id": prepared.conversation_id,
+                   "tokens_used": charged, "tokens_remaining": remaining,
+                   "model_used": prepared.model, "mode_used": prepared.mode,
+                   "usage_estimated": total_usage is None}
+        except (asyncio.CancelledError, GeneratorExit):
+            raise
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'error': f'Error generating AI response: {str(exc)}'})}\n\n"
-            return
-
-        words = result.response.split(" ")
-        for idx, word in enumerate(words):
-            chunk = (" " if idx > 0 else "") + word
-            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-
-        done_payload = {
-            "type": "done",
-            "conversation_id": result.conversation_id,
-            "tokens_used": result.tokens_used,
-            "tokens_remaining": result.tokens_remaining,
-            "model_used": result.model_used,
-            "mode_used": result.mode_used,
-        }
-        yield f"data: {json.dumps(done_payload)}\n\n"
+            # Never expose provider exceptions, request headers, keys, or stack traces.
+            logger.warning("Generation failed (%s)", type(exc).__name__)
+            configured_error = isinstance(exc, HTTPException) and exc.status_code == 503
+            yield {"type": "error", "status": 503 if configured_error else 502,
+                   "error": "AI provider is not configured. Please try again later." if configured_error
+                   else "AI generation failed. Please try again.",
+                   "conversation_id": prepared.conversation_id}
+        finally:
+            prepared.cancel.set()
+            if not settled:
+                # ASGI disconnects cancel the surrounding task group. Shield only
+                # bounded durable settlement; never shield the upstream generation.
+                with anyio.CancelScope(shield=True):
+                    await run_in_threadpool(ChatService._settle, prepared,
+                                            "cancelled" if text else "failed",
+                                            total_usage if total_usage is not None else (None if text else 0))

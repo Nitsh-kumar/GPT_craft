@@ -1,58 +1,41 @@
-import os
 import json
+from uuid import uuid4
 import pytest
-from unittest.mock import patch
-from fastapi.testclient import TestClient
+from app.db.session import SessionLocal
+from app.db.models import DailyQuota
+from app.db.crud_token import utc_now
 
-os.environ["DATABASE_URL"] = "sqlite:///./test_suite.db"
-os.environ["SECRET_KEY"] = "test-secret-key-for-ci-harness"
-# Do not override GROQ_API_KEY if we want to test model failure, or mock agent to raise the exact Groq error:
 
-from app.main import app, seed_default_plan
-from app.db.base import Base
-from app.db.session import engine, SessionLocal
-from app.db.models import User
+def events(response):
+    return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith('data: ')]
 
-@pytest.fixture(autouse=True)
-def reset_db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    seed_default_plan()
-    yield
-    Base.metadata.drop_all(bind=engine)
 
-client = TestClient(app, raise_server_exceptions=True)
+def test_sse_streams_and_settles(client, registered, provider):
+    _, headers = registered()
+    response = client.post('/chat/stream', headers=headers, json={'message':'hello'})
+    frames = events(response)
+    assert frames[0]['type'] == 'start'
+    assert any(frame['type'] == 'chunk' for frame in frames)
+    assert frames[-1]['type'] == 'done'
+    assert frames[-1]['tokens_used'] == 42
+    assert client.get('/chat/quota', headers=headers).json()['tokensRemaining'] == 4958
 
-def test_chat_stream_when_llm_fails_does_not_crash_connection():
-    """
-    When the LLM provider fails (e.g. model not found / decommissioned / API error),
-    the streaming endpoint must NOT crash with 'RuntimeError: Caught handled exception, but response already started.'
-    It should either yield an SSE error event or return an HTTP error before streaming starts.
-    """
-    # Register user
-    reg = client.post(
-        "/auth/register",
-        json={"name": "Alice", "email": "alice@example.com", "password": "password123"},
-    )
-    assert reg.status_code == 201
-    token = reg.json()["accessToken"]
-    headers = {"Authorization": f"Bearer {token}"}
 
-    # Simulate Groq 404 model_not_found error
-    with patch("app.services.chat.agent.invoke") as mock_invoke:
-        mock_invoke.side_effect = Exception("The model `llama-3.1-8b-instant` does not exist or you do not have access to it.")
-        
-        # Test stream endpoint
-        with client.stream(
-            "POST",
-            "/chat/stream",
-            headers=headers,
-            json={"message": "Break down vector embeddings", "model": "llama3-8b-8192"},
-        ) as response:
-            lines = [line for line in response.iter_lines() if line]
-            events = [json.loads(line[6:]) for line in lines if line.startswith("data: ")]
-            
-            # The client should receive an error event rather than a connection crash
-            error_events = [e for e in events if e.get("type") == "error"]
-            assert len(error_events) == 1, f"Expected 1 error event, got events: {events}"
-            assert "The model `llama-3.1-8b-instant` does not exist" in error_events[0]["error"]
+@pytest.mark.parametrize('path', ['/chat', '/chat/stream'])
+def test_rejects_before_dispatch_when_quota_insufficient(client, registered, provider, path):
+    data, headers = registered()
+    with SessionLocal() as db:
+        db.get(DailyQuota, (data['user']['id'], utc_now().date())).tokens_remaining = 1
+        db.commit()
+    assert client.post(path, headers=headers, json={'message':'hello'}).status_code == 402
+    assert provider.calls == 0
+    assert client.get('/chat/conversations', headers=headers).json() == []
+
+
+def test_duplicate_request_cannot_dispatch_or_charge_twice(client, registered, provider):
+    _, headers = registered()
+    payload = {'message':'hello', 'request_id':str(uuid4())}
+    assert client.post('/chat', headers=headers, json=payload).status_code == 200
+    assert client.post('/chat', headers=headers, json=payload).status_code == 409
+    assert provider.calls == 1
+    assert client.get('/chat/quota', headers=headers).json()['tokensRemaining'] == 4958

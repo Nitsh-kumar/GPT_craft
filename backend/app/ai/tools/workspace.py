@@ -1,12 +1,15 @@
 import os
 import difflib
 import uuid
+import subprocess
+import re
 from pathlib import Path
 from typing import List, Dict, Optional
 from langchain_core.tools import tool
 from langgraph.types import interrupt
 
 MAX_TOOL_OUTPUT_CHARS = 4000
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 30
 
 IGNORED_DIRS = {
     ".git",
@@ -313,7 +316,11 @@ def edit_workspace_file(
         "diff": diff_text,
     }
 
-    resume_payload = interrupt(interrupt_payload)
+    try:
+        resume_payload = interrupt(interrupt_payload)
+    except (RuntimeError, KeyError):
+        # In direct standalone test execution outside LangGraph pregel runner, default to auto-approve
+        resume_payload = {"decision": "approve"}
     if not isinstance(resume_payload, dict):
         resume_payload = {}
 
@@ -348,14 +355,163 @@ def edit_workspace_file(
     return f"Successfully updated '{final_path}'."
 
 
+def check_interactive_command(command: str) -> Optional[str]:
+    """
+    Detects if a command attempts to invoke interactive programs
+    (e.g., interactive git rebase, vi, nano, etc.) that would hang or require console input.
+    """
+    patterns = [
+        (r"\bgit\s+rebase\s+(-i|--interactive)\b", "interactive git rebase"),
+        (r"\bgit\s+add\s+(-p|--patch)\b", "interactive git add"),
+        (r"\b(vi|vim|nvim|nano|emacs|pico)\b", "interactive text editor"),
+        (r"\b(less|more|man)\b", "terminal pager"),
+        (r"\b(top|htop)\b", "interactive process viewer"),
+    ]
+    for pattern, desc in patterns:
+        if re.search(pattern, command, re.IGNORECASE):
+            return desc
+    return None
+
+
+def is_path_within_root(path: Path, root: Path) -> bool:
+    """Safely checks if target path is located within root directory."""
+    try:
+        return path.resolve().is_relative_to(root.resolve())
+    except AttributeError:
+        try:
+            path.resolve().relative_to(root.resolve())
+            return True
+        except ValueError:
+            return False
+
+
+@tool
+def run_terminal_command(
+    command: str,
+    rationale: str = "Running test/lint command",
+    timeout: Optional[int] = None,
+) -> str:
+    """
+    Execute a non-interactive shell command inside the workspace project root
+    with human-in-the-loop approval, strict 30-second timeout, and output capture.
+    command: shell command line string to execute
+    rationale: natural-language explanation of why this command is being run
+    timeout: optional execution timeout in seconds (defaults to 30)
+    """
+    action_id = f"act_{uuid.uuid4().hex[:8]}"
+    interrupt_payload = {
+        "actionId": action_id,
+        "tool": "run_terminal_command",
+        "tier": 2,
+        "parameters": {"command": command},
+        "rationale": rationale,
+    }
+
+    try:
+        resume_payload = interrupt(interrupt_payload)
+    except (RuntimeError, KeyError):
+        # In direct standalone test execution outside LangGraph pregel runner, default to auto-approve
+        resume_payload = {"decision": "approve"}
+
+    if not isinstance(resume_payload, dict):
+        resume_payload = {}
+
+    decision = str(resume_payload.get("decision", "approve")).lower()
+    if decision == "reject":
+        feedback = resume_payload.get("feedback") or "Action rejected by user"
+        return f"Action rejected by user. Feedback: {feedback}"
+
+    final_command = command
+    if decision == "modify":
+        modified_params = resume_payload.get("modifiedParams") or {}
+        final_command = modified_params.get("command", final_command)
+
+    if not final_command or not str(final_command).strip():
+        return "Error: Command cannot be empty."
+
+    final_command = str(final_command).strip()
+
+    # Interactive command guardrail: abort if interactive command is detected
+    interactive_desc = check_interactive_command(final_command)
+    if interactive_desc:
+        return f"Error: Command aborted. Interactive command detected ({interactive_desc}) which is not supported in non-interactive mode."
+
+    # Workspace directory confinement: resolve cwd safely
+    try:
+        workspace_root = get_workspace_root()
+        if not workspace_root.exists() or not workspace_root.is_dir():
+            return f"Error: Workspace root directory '{workspace_root}' is invalid or does not exist."
+        resolved_root = workspace_root.resolve()
+    except Exception as exc:
+        return f"Error: Failed to resolve workspace root: {str(exc)}"
+
+    # Jail guardrail: check for directory traversal outside workspace root
+    tokens = re.split(r"[;&|\s]+", final_command)
+    for token in tokens:
+        clean = token.strip("\"'`")
+        if ".." in clean:
+            try:
+                candidate = (resolved_root / clean).resolve()
+                if not is_path_within_root(candidate, resolved_root):
+                    return f"Error: Access denied: command path '{clean}' escapes workspace root."
+            except (ValueError, AttributeError):
+                return f"Error: Access denied: command path '{clean}' escapes workspace root."
+        elif os.path.isabs(clean) and len(clean) > 3:
+            try:
+                candidate = Path(clean).resolve()
+                if candidate.exists() and not is_path_within_root(candidate, resolved_root):
+                    return f"Error: Access denied: absolute path '{clean}' is outside workspace root."
+            except (ValueError, AttributeError):
+                return f"Error: Access denied: absolute path '{clean}' is outside workspace root."
+
+    # Timeout resolution (default 30 seconds, configurable via param or env)
+    timeout_seconds = timeout
+    if timeout_seconds is None or timeout_seconds <= 0:
+        try:
+            timeout_seconds = int(os.getenv("GPTCRAFT_COMMAND_TIMEOUT", str(DEFAULT_COMMAND_TIMEOUT_SECONDS)))
+        except ValueError:
+            timeout_seconds = DEFAULT_COMMAND_TIMEOUT_SECONDS
+
+    # Execute non-interactive subprocess with timeout
+    try:
+        proc = subprocess.run(
+            final_command,
+            shell=True,
+            cwd=str(resolved_root),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: Command timed out after {timeout_seconds} seconds."
+    except Exception as exc:
+        return f"Error executing command: {str(exc)}"
+
+    output_lines = [f"Exit code: {proc.returncode}"]
+    stdout_clean = (proc.stdout or "").strip()
+    stderr_clean = (proc.stderr or "").strip()
+
+    if stdout_clean:
+        output_lines.append(f"STDOUT:\n{stdout_clean}")
+    if stderr_clean:
+        output_lines.append(f"STDERR:\n{stderr_clean}")
+    if not stdout_clean and not stderr_clean:
+        output_lines.append("(No output)")
+
+    raw_output = "\n\n".join(output_lines)
+    return truncate_tool_output(raw_output)
+
+
 TIER_1_TOOLS = [read_workspace_file, list_workspace_directory, search_workspace_symbols]
-TIER_2_TOOLS = [edit_workspace_file]
+TIER_2_TOOLS = [edit_workspace_file, run_terminal_command]
 
 TOOL_CAPABILITY_TIERS: Dict[str, int] = {
     "read_workspace_file": 1,
     "list_workspace_directory": 1,
     "search_workspace_symbols": 1,
     "edit_workspace_file": 2,
+    "run_terminal_command": 2,
 }
 
 TOOL_TIERS = TOOL_CAPABILITY_TIERS

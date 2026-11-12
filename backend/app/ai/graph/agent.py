@@ -7,9 +7,9 @@ from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm, CRAFT_MODES, LocalCraftLLM
-from app.ai.tools.workspace import TIER_1_TOOLS, TIER_2_TOOLS
+from app.ai.tools.workspace import TIER_1_TOOLS, TIER_2_TOOLS, run_terminal_command
 
-# Define tools here (Tier 1 read-only tools + Tier 2 HITL file mutation tools)
+# Define tools here (Tier 1 read-only tools + Tier 2 HITL file & terminal mutation tools)
 tools = list(TIER_1_TOOLS) + list(TIER_2_TOOLS)
 
 # Maximum messages kept in the sliding context window (plus system prompt)

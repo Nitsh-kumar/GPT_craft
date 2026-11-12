@@ -193,6 +193,16 @@ class LocalCraftLLM:
                         "rationale": "Applying requested file changes.",
                     }
                     call_id = "call_edit_1"
+                elif any(k in prompt_lower for k in ("terminal", "command", "bash", "shell", "run test", "run pytest", "execute command")):
+                    tool_name = "run_terminal_command"
+                    cmd = "python -c \"print('Hello from terminal')\""
+                    if "pytest" in prompt_lower:
+                        cmd = "pytest tests/test_api.py"
+                    tool_args = {
+                        "command": cmd,
+                        "rationale": "Executing test/lint command in workspace.",
+                    }
+                    call_id = "call_cmd_1"
                 elif "read" in prompt_lower or "glossary" in prompt_lower or "readme" in prompt_lower:
                     tool_name = "read_workspace_file"
                     target = "GLOSSARY.md" if "glossary" in prompt_lower else "README.md"

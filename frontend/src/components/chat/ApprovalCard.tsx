@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldAlert, Check, X, Edit3, FileCode, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { ShieldAlert, Check, X, Edit3, FileCode, Terminal, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { ApprovalRequiredEnvelope } from '../../types';
 import { cn } from '../../utils/cn';
 
@@ -19,9 +19,16 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
   onDecision,
   disabled = false,
 }) => {
+  const isCommand = Boolean(
+    approval.tool === 'run_terminal_command' ||
+    approval.parameters.command !== undefined
+  );
+  const initialCommand = String(approval.parameters.command || '');
+
   const [mode, setMode] = useState<'view' | 'modify' | 'reject'>('view');
   const [modifiedPath, setModifiedPath] = useState(String(approval.parameters.path || ''));
   const [modifiedContent, setModifiedContent] = useState(String(approval.parameters.content || ''));
+  const [modifiedCommand, setModifiedCommand] = useState(initialCommand);
   const [feedback, setFeedback] = useState('');
   const [showFullDiff, setShowFullDiff] = useState(true);
 
@@ -32,15 +39,25 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
   };
 
   const handleConfirmModify = () => {
-    onDecision(
-      approval.actionId,
-      'modify',
-      {
-        path: modifiedPath,
-        content: modifiedContent,
-        mode: approval.parameters.mode || 'write',
-      }
-    );
+    if (isCommand) {
+      onDecision(
+        approval.actionId,
+        'modify',
+        {
+          command: modifiedCommand,
+        }
+      );
+    } else {
+      onDecision(
+        approval.actionId,
+        'modify',
+        {
+          path: modifiedPath,
+          content: modifiedContent,
+          mode: approval.parameters.mode || 'write',
+        }
+      );
+    }
     setMode('view');
   };
 
@@ -82,42 +99,68 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
             Rationale
           </span>
           <p className="text-ink text-sm leading-relaxed bg-raised/50 p-2.5 rounded-lg border border-line">
-            {approval.rationale || 'Mutating workspace file'}
+            {approval.rationale || (isCommand ? 'Running terminal command' : 'Mutating workspace file')}
           </p>
         </div>
 
-        {/* Target Path */}
-        <div className="flex items-center gap-2 font-mono text-xs bg-sunken/60 px-3 py-1.5 rounded-lg border border-line">
-          <FileCode size={13} className="text-accent shrink-0" />
-          <span className="text-ink-3">Target:</span>
-          <span className="text-ink font-medium truncate">{String(approval.parameters.path || 'Unknown')}</span>
-        </div>
+        {/* Target Path or Shell Command */}
+        {isCommand ? (
+          <div className="flex items-center gap-2 font-mono text-xs bg-sunken/60 px-3 py-1.5 rounded-lg border border-line">
+            <Terminal size={13} className="text-accent shrink-0" />
+            <span className="text-ink-3">Command:</span>
+            <span className="text-ink font-medium truncate">{initialCommand}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 font-mono text-xs bg-sunken/60 px-3 py-1.5 rounded-lg border border-line">
+            <FileCode size={13} className="text-accent shrink-0" />
+            <span className="text-ink-3">Target:</span>
+            <span className="text-ink font-medium truncate">{String(approval.parameters.path || 'Unknown')}</span>
+          </div>
+        )}
 
         {/* Diff Preview / Modification Editor */}
         {mode === 'modify' ? (
           <div className="space-y-2 border border-line rounded-lg bg-raised p-3">
             <div className="flex items-center justify-between">
-              <span className="font-mono font-semibold text-xs text-accent">Modify Target Content</span>
-              <span className="text-[11px] text-ink-3">Edit file content below</span>
+              <span className="font-mono font-semibold text-xs text-accent">
+                {isCommand ? 'Modify Shell Command' : 'Modify Target Content'}
+              </span>
+              <span className="text-[11px] text-ink-3">
+                {isCommand ? 'Edit command line below' : 'Edit file content below'}
+              </span>
             </div>
-            <div>
-              <label className="block text-[11px] text-ink-3 mb-1 font-mono">File Path:</label>
-              <input
-                type="text"
-                value={modifiedPath}
-                onChange={(e) => setModifiedPath(e.target.value)}
-                className="w-full rounded border border-line bg-sunken px-2.5 py-1.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] text-ink-3 mb-1 font-mono">New Content:</label>
-              <textarea
-                value={modifiedContent}
-                onChange={(e) => setModifiedContent(e.target.value)}
-                rows={8}
-                className="w-full rounded border border-line bg-sunken p-2.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
-              />
-            </div>
+            {isCommand ? (
+              <div>
+                <label className="block text-[11px] text-ink-3 mb-1 font-mono">Shell Command:</label>
+                <input
+                  type="text"
+                  value={modifiedCommand}
+                  onChange={(e) => setModifiedCommand(e.target.value)}
+                  className="w-full rounded border border-line bg-sunken px-2.5 py-1.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-[11px] text-ink-3 mb-1 font-mono">File Path:</label>
+                  <input
+                    type="text"
+                    value={modifiedPath}
+                    onChange={(e) => setModifiedPath(e.target.value)}
+                    className="w-full rounded border border-line bg-sunken px-2.5 py-1.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-ink-3 mb-1 font-mono">New Content:</label>
+                  <textarea
+                    value={modifiedContent}
+                    onChange={(e) => setModifiedContent(e.target.value)}
+                    rows={8}
+                    className="w-full rounded border border-line bg-sunken p-2.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                  />
+                </div>
+              </>
+            )}
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -173,7 +216,7 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className="font-semibold text-ink-3 uppercase text-[10px] tracking-wider">
-                Proposed Diff
+                {isCommand ? 'Execution Plan' : 'Proposed Diff'}
               </span>
               <button
                 type="button"
@@ -185,26 +228,39 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
               </button>
             </div>
             {showFullDiff && (
-              <div
-                data-testid="diff-viewer"
-                className="max-h-60 overflow-x-auto rounded-lg border border-line bg-sunken p-2.5 font-mono text-[11px] leading-relaxed"
-              >
-                {diffLines.map((line, idx) => {
-                  let lineStyle = 'text-ink-2';
-                  if (line.startsWith('+') && !line.startsWith('+++')) {
-                    lineStyle = 'bg-ok/15 text-ok font-semibold';
-                  } else if (line.startsWith('-') && !line.startsWith('---')) {
-                    lineStyle = 'bg-danger/15 text-danger font-semibold';
-                  } else if (line.startsWith('@@')) {
-                    lineStyle = 'text-accent font-semibold';
-                  }
-                  return (
-                    <div key={idx} className={cn('px-1.5 py-0.5 rounded-sm whitespace-pre', lineStyle)}>
-                      {line}
-                    </div>
-                  );
-                })}
-              </div>
+              isCommand ? (
+                <div
+                  data-testid="command-viewer"
+                  className="rounded-lg border border-line bg-sunken p-3 font-mono text-xs text-ink"
+                >
+                  <div className="flex items-center gap-2 text-ink-3 pb-1.5 border-b border-line/40 text-[11px]">
+                    <Terminal size={12} />
+                    <span>Working Directory: Workspace Project Root</span>
+                  </div>
+                  <pre className="mt-2 text-ok whitespace-pre-wrap break-all">$ {initialCommand}</pre>
+                </div>
+              ) : (
+                <div
+                  data-testid="diff-viewer"
+                  className="max-h-60 overflow-x-auto rounded-lg border border-line bg-sunken p-2.5 font-mono text-[11px] leading-relaxed"
+                >
+                  {diffLines.map((line, idx) => {
+                    let lineStyle = 'text-ink-2';
+                    if (line.startsWith('+') && !line.startsWith('+++')) {
+                      lineStyle = 'bg-ok/15 text-ok font-semibold';
+                    } else if (line.startsWith('-') && !line.startsWith('---')) {
+                      lineStyle = 'bg-danger/15 text-danger font-semibold';
+                    } else if (line.startsWith('@@')) {
+                      lineStyle = 'text-accent font-semibold';
+                    }
+                    return (
+                      <div key={idx} className={cn('px-1.5 py-0.5 rounded-sm whitespace-pre', lineStyle)}>
+                        {line}
+                      </div>
+                    );
+                  })}
+                </div>
+              )
             )}
           </div>
         )}
@@ -230,7 +286,7 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
               className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-raised px-3 py-1.5 font-medium text-xs text-ink hover:border-line-strong hover:bg-surface transition-colors disabled:opacity-50"
             >
               <Edit3 size={13} />
-              <span>Modify Diff</span>
+              <span>{isCommand ? 'Modify Command' : 'Modify Diff'}</span>
             </button>
             <button
               type="button"

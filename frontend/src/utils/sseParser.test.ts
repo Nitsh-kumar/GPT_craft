@@ -140,3 +140,26 @@ test("parses approval_required event envelope with diff, actionId, and rationale
     assert.equal(events[1].conversationId, "202");
   }
 });
+
+test("parses approval_required event envelope for run_terminal_command with command parameter", () => {
+  const raw = [
+    `event: approval_required\ndata: {"actionId":"act_cmd_1","tool":"run_terminal_command","tier":2,"parameters":{"command":"pytest backend/tests/test_api.py"},"rationale":"Running test suite"}`,
+    `event: done\ndata: {"status":"interrupted","totalSteps":1,"conversationId":"303"}`,
+  ].join("\n\n") + "\n\n";
+
+  const { events } = parseSseBuffer("", raw, true);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].type, "approval_required");
+  if (events[0].type === "approval_required") {
+    assert.equal(events[0].actionId, "act_cmd_1");
+    assert.equal(events[0].tool, "run_terminal_command");
+    assert.equal(events[0].tier, 2);
+    assert.equal(events[0].parameters.command, "pytest backend/tests/test_api.py");
+    assert.equal(events[0].rationale, "Running test suite");
+  }
+  assert.equal(events[1].type, "done");
+  if (events[1].type === "done") {
+    assert.equal(events[1].status, "interrupted");
+    assert.equal(events[1].conversationId, "303");
+  }
+});

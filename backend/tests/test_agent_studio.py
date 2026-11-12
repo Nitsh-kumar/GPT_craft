@@ -538,5 +538,189 @@ def test_pending_approval_persists_and_restored(tmp_path, monkeypatch):
     assert after_res.json() is None
 
 
+def test_run_terminal_command_registration_and_tier():
+    from app.ai.tools.workspace import (
+        run_terminal_command,
+        TIER_2_TOOLS,
+        TOOL_TIERS,
+        TOOL_CAPABILITY_TIERS,
+        get_tool_tier,
+    )
+
+    assert run_terminal_command in TIER_2_TOOLS
+    assert TOOL_TIERS["run_terminal_command"] == 2
+    assert TOOL_CAPABILITY_TIERS["run_terminal_command"] == 2
+    assert get_tool_tier("run_terminal_command") == 2
+
+
+def test_run_terminal_command_successful_execution():
+    import sys
+    from app.ai.tools.workspace import run_terminal_command
+
+    cmd = f'"{sys.executable}" -c "print(\'Hello GPTCraft\')"'
+    res = run_terminal_command.invoke({"command": cmd})
+
+    assert "Exit code: 0" in res
+    assert "Hello GPTCraft" in res
+
+
+def test_run_terminal_command_timeout_enforcement():
+    import sys
+    from app.ai.tools.workspace import run_terminal_command
+
+    # Explicit timeout parameter
+    sleep_cmd = f'"{sys.executable}" -c "import time; time.sleep(5)"'
+    res = run_terminal_command.invoke({"command": sleep_cmd, "timeout": 1})
+    assert "Error: Command timed out after 1 seconds." in res
+
+
+def test_run_terminal_command_timeout_via_env_var(monkeypatch):
+    import sys
+    from app.ai.tools.workspace import run_terminal_command
+
+    monkeypatch.setenv("GPTCRAFT_COMMAND_TIMEOUT", "1")
+    sleep_cmd = f'"{sys.executable}" -c "import time; time.sleep(5)"'
+    res = run_terminal_command.invoke({"command": sleep_cmd})
+    assert "Error: Command timed out after 1 seconds." in res
+
+
+def test_run_terminal_command_non_interactive_stdin_behavior():
+    import sys
+    from app.ai.tools.workspace import run_terminal_command
+
+    # Non-interactive stdin: commands attempting to read stdin fail or exit without hanging
+    stdin_cmd = f'"{sys.executable}" -c "input(\'Enter something: \')"'
+    res = run_terminal_command.invoke({"command": stdin_cmd})
+    assert "Exit code:" in res
+    # With stdin=subprocess.DEVNULL, python input() raises EOFError and returns non-zero
+    assert "EOFError" in res or "Exit code: 1" in res or "Exit code: 0" not in res
+
+    # Block interactive editor/pager commands
+    res_nano = run_terminal_command.invoke({"command": "nano docs/readme.txt"})
+    assert "Error: Command aborted. Interactive command detected" in res_nano
+    assert "interactive text editor" in res_nano
+
+    res_vim = run_terminal_command.invoke({"command": "vim app/main.py"})
+    assert "Error: Command aborted. Interactive command detected" in res_vim
+
+    res_git = run_terminal_command.invoke({"command": "git rebase -i HEAD~3"})
+    assert "Error: Command aborted. Interactive command detected" in res_git
+    assert "interactive git rebase" in res_git
+
+
+def test_run_terminal_command_path_jail_violation():
+    from app.ai.tools.workspace import run_terminal_command
+
+    # Traversal escaping workspace root
+    res_escape = run_terminal_command.invoke({"command": "cat ../../outside.txt"})
+    assert "Error: Access denied" in res_escape
+    assert "escapes workspace root" in res_escape
+
+
+def test_run_terminal_command_hitl_mock_lifecycle():
+    import sys
+    from unittest.mock import patch
+    from app.ai.tools.workspace import run_terminal_command
+
+    # 1. Approval flow
+    with patch("app.ai.tools.workspace.interrupt") as mock_interrupt:
+        mock_interrupt.return_value = {"decision": "approve"}
+        res_approve = run_terminal_command.invoke({
+            "command": f'"{sys.executable}" -c "print(\'Approved execution\')"',
+            "rationale": "Verifying test suite",
+        })
+        assert "Exit code: 0" in res_approve
+        assert "Approved execution" in res_approve
+
+    # 2. Rejection flow with user feedback
+    with patch("app.ai.tools.workspace.interrupt") as mock_interrupt:
+        mock_interrupt.return_value = {
+            "decision": "reject",
+            "feedback": "Commands are restricted in read-only audit mode.",
+        }
+        res_reject = run_terminal_command.invoke({
+            "command": "pytest backend/tests",
+            "rationale": "Running test suite",
+        })
+        assert "Action rejected by user. Feedback: Commands are restricted in read-only audit mode." in res_reject
+
+    # 3. Modification flow
+    with patch("app.ai.tools.workspace.interrupt") as mock_interrupt:
+        mock_interrupt.return_value = {
+            "decision": "modify",
+            "modifiedParams": {
+                "command": f'"{sys.executable}" -c "print(\'Overridden command\')"'
+            },
+        }
+        res_mod = run_terminal_command.invoke({
+            "command": "original dangerous command",
+            "rationale": "Running test suite",
+        })
+        assert "Exit code: 0" in res_mod
+        assert "Overridden command" in res_mod
+
+
+def test_run_terminal_command_chat_stream_approval_and_resumption():
+    import sys
+    token = register_user("terminal_approval@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Step 1: Request terminal command execution in Agent Studio mode
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Run terminal command pytest tests/test_api.py", "mode": "agent"},
+    )
+    assert res.status_code == 200
+    events = parse_sse_blocks(res.text)
+    event_names = [e["event"] for e in events]
+
+    assert "thought" in event_names
+    assert "action_call" in event_names
+    assert "approval_required" in event_names
+    assert "done" in event_names
+
+    ac = [e["data"] for e in events if e["event"] == "action_call"][0]
+    assert ac["tool"] == "run_terminal_command"
+    assert ac["tier"] == 2
+
+    appr = [e["data"] for e in events if e["event"] == "approval_required"][0]
+    assert appr["actionId"].startswith("act_")
+    assert appr["tool"] == "run_terminal_command"
+    assert appr["tier"] == 2
+    assert "command" in appr["parameters"]
+
+    action_id = appr["actionId"]
+
+    # Step 2: Resume via POST /chat/approval with modify decision
+    modified_cmd = f'"{sys.executable}" -c "print(\'Modified command executed successfully\')"'
+    res_appr = client.post(
+        "/chat/approval",
+        headers=headers,
+        json={
+            "actionId": action_id,
+            "decision": "modify",
+            "modifiedParams": {"command": modified_cmd},
+        },
+    )
+    assert res_appr.status_code == 200
+    resume_events = parse_sse_blocks(res_appr.text)
+    resume_names = [e["event"] for e in resume_events]
+
+    assert "action_result" in resume_names
+    assert "token" in resume_names
+    assert "done" in resume_names
+
+    ar = [e["data"] for e in resume_events if e["event"] == "action_result"][0]
+    assert ar["actionId"] == action_id
+    assert ar["tool"] == "run_terminal_command"
+    assert "Modified command executed successfully" in ar["output"]
+    assert "Exit code: 0" in ar["output"]
+
+    done_ev = [e["data"] for e in resume_events if e["event"] == "done"][0]
+    assert done_ev["status"] == "completed"
+
+
+
 
 

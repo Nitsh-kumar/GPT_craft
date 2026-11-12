@@ -188,6 +188,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw new Error(error.message);
       }
 
+      if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
+        throw new Error('Email already registered. Please sign in instead.');
+      }
+
       // If email is auto-confirmed or session is active immediately
       let token = data.session?.access_token;
       if (!token) {

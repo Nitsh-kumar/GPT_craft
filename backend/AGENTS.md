@@ -22,3 +22,11 @@
 4. **Testing**:
    - Write and maintain `pytest` tests in `backend/tests/` for every new endpoint, service method, or LangGraph node.
    - Mock external LLM calls (`agent.invoke`) in unit/contract tests so tests run deterministically offline without consuming provider tokens.
+5. **Agent Studio & Tool Execution Safety**:
+   - Refer to architectural guidelines in `docs/adr/0002-personal-agent-execution-boundaries.md` and `docs/adr/0003-hitl-interruption-and-approval-protocol.md`.
+   - **3-Tier Capability Model**:
+     - *Tier 1 (Read-Only)*: Auto-executed without user interruption (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`). Truncate tool output to 4,000 characters to prevent context window saturation.
+     - *Tier 2 (Workspace Mutation)*: Must suspend via LangGraph native `interrupt()` backed by DB state checkpointing and emit an `approval_required` SSE envelope. Resumed via `POST /chat/approval`.
+     - *Tier 3 (Destructive / External)*: Requires explicit command and diff review before confirmation.
+   - **Execution Guardrails**: All workspace tools in `app/ai/tools/` must confine paths strictly inside the active workspace root (reject path traversal), enforce a 30-second execution timeout, and fail immediately on interactive `stdin` prompts.
+   - **Typed SSE Envelopes**: In `agent` craft mode, `POST /chat/stream` emits structured SSE envelopes (`thought`, `action_call`, `approval_required`, `action_result`, `token`, `done`).

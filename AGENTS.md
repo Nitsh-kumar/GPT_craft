@@ -24,7 +24,7 @@ GPT_craft/
 
 1. **Working Directory Discipline**:
    - Backend commands (`pytest`, `uvicorn`, `alembic`) must be executed from `backend/` (or with `PYTHONPATH=backend`) because imports use `from app....`.
-   - Frontend commands (`npm run dev`, `npm run lint`, `npm run build`) must be executed from `frontend/`.
+   - Frontend commands (`npm run dev`, `npm run test:unit`, `npm run lint`, `npm run build`) must be executed from `frontend/`.
 
 2. **Cross-Stack Contract Alignment**:
    - Whenever you modify a Pydantic schema in `backend/app/schemas/` or a route in `backend/app/api/routes/`, you **must** verify and update the corresponding TypeScript interfaces in `frontend/src/types/index.ts` and API clients in `frontend/src/services/`.
@@ -36,7 +36,7 @@ GPT_craft/
    - Never commit `.env` or `.db` files. Update `backend/.env.example` and `frontend/.env.example` whenever new environment variables are introduced.
 
 4. **Verification Before Completion**:
-   - Before declaring any task complete, run the verification suite via `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1` (or activate the `gptcraft-verify` skill) to ensure both backend `pytest` and frontend `tsc --noEmit` + `vite build` pass with zero errors.
+   - Before declaring any task complete, run the verification suite via `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1` (or activate the `gptcraft-verify` skill) to ensure both backend `pytest` and frontend `npm run test:unit` + `tsc --noEmit` + `vite build` pass with zero errors.
 
 5. **Mem0 Persistent Memory & Harness Integration**:
    - The agent harness is integrated with **Mem0** (platform backend scoped to `nit2314`).

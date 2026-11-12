@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:e2e": "playwright test"
   },
   "dependencies": {

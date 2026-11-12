@@ -28,6 +28,8 @@ frontend/playwright-report/
 # OS / Editor
 .DS_Store
 Thumbs.db
+.scratch/
+.superpowers/
 
 
 docs/screenshots/*

@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import { apiFetch, getAuthToken } from './api';
-import { CraftMode, Message, Quota, Model, SseEventEnvelope } from '../types';
+import { CraftMode, Message, Quota, Model, SseEventEnvelope, ApprovalRequiredEnvelope } from '../types';
 import { parseSseBuffer } from '../utils/sseParser';
 
 export const chatService = {
@@ -52,6 +52,84 @@ export const chatService = {
 
   deleteConversation: async (conversationId: string): Promise<void> => {
     await apiFetch<void>(`/chat/${conversationId}`, { method: 'DELETE' });
+  },
+
+  getPendingApproval: async (conversationId: string): Promise<ApprovalRequiredEnvelope | null> => {
+    try {
+      return await apiFetch<ApprovalRequiredEnvelope | null>(`/chat/${conversationId}/approval`);
+    } catch {
+      return null;
+    }
+  },
+
+  submitApproval: async (
+    actionId: string,
+    decision: 'approve' | 'modify' | 'reject',
+    modifiedParams?: Record<string, unknown>,
+    feedback?: string,
+    onChunk?: (chunk: string) => void,
+    onEvent?: (event: SseEventEnvelope) => void,
+    signal?: AbortSignal
+  ): Promise<{ conversationId?: string }> => {
+    const token = getAuthToken();
+    const baseUrl =
+      import.meta.env.VITE_API_BASE_URL !== undefined && import.meta.env.VITE_API_BASE_URL !== ''
+        ? import.meta.env.VITE_API_BASE_URL
+        : (typeof window !== 'undefined' ? window.location.origin : '');
+
+    const response = await fetch(`${baseUrl}/chat/approval`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        actionId,
+        decision,
+        modifiedParams,
+        feedback,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Unauthorized — please log in again.');
+      if (response.status === 402) throw new Error('Daily token limit exceeded. Please upgrade your plan.');
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || `Server error: ${response.statusText}`);
+    }
+
+    let resolvedConversationId = '';
+
+    if (response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        const decoded = done ? decoder.decode() : decoder.decode(value, { stream: true });
+        const { events, remaining } = parseSseBuffer(buffer, decoded, done);
+        buffer = remaining;
+
+        for (const event of events) {
+          onEvent?.(event);
+          if (event.type === 'chunk') {
+            onChunk?.(event.content);
+          } else if (event.type === 'token') {
+            onChunk?.(event.token);
+          } else if (event.type === 'done' && event.conversationId) {
+            resolvedConversationId = event.conversationId;
+          } else if (event.type === 'error') {
+            throw new Error(event.error);
+          }
+        }
+
+        if (done) break;
+      }
+    }
+
+    return { conversationId: resolvedConversationId };
   },
 
   streamMessage: async (

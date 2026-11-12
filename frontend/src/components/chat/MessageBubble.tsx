@@ -4,11 +4,18 @@ import { cn } from '../../utils/cn';
 import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb, Bot, Wrench } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ApprovalCard } from './ApprovalCard';
 
 interface MessageBubbleProps {
   message: Message;
   modelName?: string;
   modeName?: CraftMode;
+  onApprovalDecision?: (
+    actionId: string,
+    decision: 'approve' | 'modify' | 'reject',
+    modifiedParams?: Record<string, unknown>,
+    feedback?: string
+  ) => void;
 }
 
 const getModeMeta = (mode?: CraftMode) => {
@@ -32,7 +39,12 @@ const getModeMeta = (mode?: CraftMode) => {
   }
 };
 
-export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName = 'standard' }: MessageBubbleProps) => {
+export const MessageBubble = ({
+  message,
+  modelName = 'GPTCraft Engine',
+  modeName = 'standard',
+  onApprovalDecision,
+}: MessageBubbleProps) => {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
 
@@ -66,7 +78,8 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
 
   const hasThoughts = Boolean(message.thoughts && message.thoughts.length > 0);
   const hasActions = Boolean(message.actions && message.actions.length > 0);
-  if (!message.content && !hasThoughts && !hasActions) return null;
+  const hasApproval = Boolean(message.approvalRequired);
+  if (!message.content && !hasThoughts && !hasActions && !hasApproval) return null;
 
   return (
     <div className="group flex w-full animate-in flex-col rounded-xl border border-line bg-surface/60 p-4 sm:p-5 shadow-lift transition-colors hover:border-line-strong">
@@ -169,6 +182,14 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
             </div>
           ))}
         </div>
+      )}
+
+      {/* Human-In-The-Loop Approval Card */}
+      {message.approvalRequired && (
+        <ApprovalCard
+          approval={message.approvalRequired}
+          onDecision={onApprovalDecision || (() => {})}
+        />
       )}
 
       {/* Structured Content Stream */}

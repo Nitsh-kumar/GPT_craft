@@ -11,6 +11,12 @@ interface MessageListProps {
   selectedMode?: CraftMode;
   selectedModelName?: string;
   onQuickPrompt?: (prompt: string, mode?: CraftMode) => void;
+  onApprovalDecision?: (
+    actionId: string,
+    decision: 'approve' | 'modify' | 'reject',
+    modifiedParams?: Record<string, unknown>,
+    feedback?: string
+  ) => void;
 }
 
 interface WorkbenchCard {
@@ -86,6 +92,7 @@ export const MessageList = ({
   selectedMode = 'standard',
   selectedModelName = 'Llama 3.3 70B',
   onQuickPrompt,
+  onApprovalDecision,
 }: MessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -203,6 +210,7 @@ export const MessageList = ({
                 message={message}
                 modelName={selectedModelName}
                 modeName={selectedMode}
+                onApprovalDecision={onApprovalDecision}
               />
             ))}
             {isGenerating && (lastIsEmptyAssistant || messages[messages.length - 1]?.role === 'user') && (

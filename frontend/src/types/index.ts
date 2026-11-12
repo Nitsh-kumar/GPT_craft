@@ -13,6 +13,7 @@ export type SseEventEnvelope =
       tier: number;
       parameters: Record<string, unknown>;
       rationale: string;
+      diff?: string;
     }
   | { type: 'action_result'; actionId: string; tool: string; output: string }
   | { type: 'chunk'; content: string }
@@ -27,6 +28,22 @@ export type SseEventEnvelope =
       modeUsed?: string;
     }
   | { type: 'error'; error: string };
+
+export interface ApprovalRequiredEnvelope {
+  actionId: string;
+  tool: string;
+  tier: number;
+  parameters: Record<string, unknown>;
+  rationale: string;
+  diff?: string;
+}
+
+export interface ApprovalDecisionPayload {
+  actionId: string;
+  decision: 'approve' | 'modify' | 'reject';
+  modifiedParams?: Record<string, unknown>;
+  feedback?: string;
+}
 
 export interface User {
   id: string | number;
@@ -59,6 +76,7 @@ export interface Message {
   mode?: CraftMode;
   thoughts?: string[];
   actions?: AgentActionTelemetry[];
+  approvalRequired?: ApprovalRequiredEnvelope;
 }
 
 export interface Quota {

@@ -32,6 +32,16 @@ Updated: 12 November 2026
    - Added frontend action telemetry components in `MessageBubble.tsx` and updated state management in `useChat.ts`.
    - Expanded backend and frontend test suites verifying tool execution, path security, truncation, and SSE event streaming.
 
+6. **Epic #11 Ticket 3 (#14): Human-In-The-Loop (HITL) Interruption & Approval Cards**:
+   - Implemented Tier 2 tool `edit_workspace_file` with workspace root path jailing, unified diff calculation (`difflib.unified_diff`), and LangGraph `interrupt()`.
+   - Added durable `AgentApproval` database model and CRUD methods (`create_or_update_approval`, `get_pending_approval`, `resolve_approval`).
+   - Integrated in-memory graph checkpointing with `MemorySaver()` bound to `configurable.thread_id`.
+   - Built SSE stream interruption handling emitting `approval_required` and `done` with status `"interrupted"`.
+   - Created `POST /chat/approval` and `GET /chat/{conversation_id}/approval` resumption endpoints.
+   - Built interactive Paper & Ink `ApprovalCard.tsx` in frontend with unified diff viewer, Approve, Modify, and Reject with Feedback flows.
+   - Restored pending approval requests on page reload in `useChat.ts`.
+   - Expanded backend test suite with 4 comprehensive HITL test scenarios and frontend unit tests for approval envelope parsing.
+
 ---
 
 ## Active Epic #11: Stateful Autonomous Personal Agent Platform
@@ -40,7 +50,7 @@ Tracking implementation against `docs/specs/personal_agent_platform_spec.md`, `d
 
 - [x] **Ticket 1 (#12)**: Agent Studio Mode Switcher & Typed SSE Protocol Envelope Foundation
 - [x] **Ticket 2 (#13)**: Cyclical LangGraph ReAct Loop & Tier 1 Workspace Tools (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`, 4,000-char truncation)
-- [ ] **Ticket 3 (#14)**: Human-In-The-Loop (HITL) Interruption & Approval Cards (LangGraph `interrupt()`, DB checkpointing, `POST /chat/approval` resumption, interactive confirmation cards)
+- [x] **Ticket 3 (#14)**: Human-In-The-Loop (HITL) Interruption & Approval Cards (LangGraph `interrupt()`, DB checkpointing, `POST /chat/approval` resumption, interactive confirmation cards)
 - [ ] **Ticket 4 (#15)**: Command Execution Guardrails & Process Timeouts (path jailing, 30-second execution timeouts, non-interactive stdin rejection)
 - [ ] **Ticket 5 (#16)**: Model Context Protocol (MCP) Client Manager (stdio and sse client manager, dynamic tool translation to LangChain structured tools)
 - [ ] **Ticket 6 (#17)**: Action Telemetry Drawer, Diff Inspector & E2E Studio Polish (collapsible telemetry drawer, syntax-highlighted diffs, e2e test suite)

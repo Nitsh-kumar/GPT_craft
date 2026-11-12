@@ -159,6 +159,11 @@ class LocalCraftLLM:
                     f"\n\n#### Workspace Observation\n"
                     f"```text\n{obs_snippet}\n```"
                 )
+                if "rejected" in tool_observation.lower():
+                    reply += (
+                        f"\n\n#### Re-planning Action\n"
+                        f"I acknowledged your rejection. Re-planning next steps based on user feedback: {obs_snippet}"
+                    )
         else:
             reply += (
                 f"#### Core Insights\n"
@@ -173,7 +178,22 @@ class LocalCraftLLM:
             last_msg = messages[-1] if messages else None
             if last_msg and getattr(last_msg, "type", "") == "human":
                 prompt_lower = str(last_msg.content).lower()
-                if "read" in prompt_lower or "glossary" in prompt_lower or "readme" in prompt_lower:
+                if any(k in prompt_lower for k in ("edit", "modify", "create", "update", "write")):
+                    tool_name = "edit_workspace_file"
+                    target_path = "docs/test_edit.txt"
+                    for word in str(last_msg.content).split():
+                        clean_word = word.strip("\"'`;,")
+                        if "/" in clean_word or clean_word.endswith((".txt", ".md", ".py", ".json")):
+                            target_path = clean_word
+                            break
+                    tool_args = {
+                        "path": target_path,
+                        "content": "Updated content from Agent Studio",
+                        "mode": "write",
+                        "rationale": "Applying requested file changes.",
+                    }
+                    call_id = "call_edit_1"
+                elif "read" in prompt_lower or "glossary" in prompt_lower or "readme" in prompt_lower:
                     tool_name = "read_workspace_file"
                     target = "GLOSSARY.md" if "glossary" in prompt_lower else "README.md"
                     tool_args = {"path": target, "start_line": 1, "end_line": 50}

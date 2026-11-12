@@ -22,6 +22,7 @@ export const ChatPage = () => {
     setSelectedModel,
     setSelectedMode,
     sendMessage,
+    handleApprovalDecision,
     stopGeneration,
     clearChat,
     selectConversation,
@@ -75,6 +76,7 @@ export const ChatPage = () => {
             if (mode) setSelectedMode(mode);
             sendMessage(prompt, mode);
           }}
+          onApprovalDecision={handleApprovalDecision}
         />
 
         {/* Input Area */}

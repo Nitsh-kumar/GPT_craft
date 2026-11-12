@@ -346,5 +346,197 @@ def test_agent_react_loop_emits_action_call_and_action_result_sse_envelopes():
     assert done_payload["modeUsed"] == "agent"
 
 
+def test_tier2_tool_triggers_interrupt_and_emits_approval_required(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    token = register_user("tier2_stream@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Please edit and update docs/test_edit.txt with new guidelines", "mode": "agent"},
+    )
+    assert res.status_code == 200
+    events = parse_sse_blocks(res.text)
+    event_names = [e["event"] for e in events]
+
+    assert "thought" in event_names
+    assert "action_call" in event_names
+    assert "approval_required" in event_names
+    assert "done" in event_names
+
+    # Check action_call
+    ac = [e["data"] for e in events if e["event"] == "action_call"][0]
+    assert ac["tool"] == "edit_workspace_file"
+    assert ac["tier"] == 2
+
+    # Check approval_required
+    appr = [e["data"] for e in events if e["event"] == "approval_required"][0]
+    assert appr["actionId"].startswith("act_")
+    assert appr["tool"] == "edit_workspace_file"
+    assert appr["tier"] == 2
+    assert "parameters" in appr
+    assert "rationale" in appr
+    assert "diff" in appr
+    assert "+Updated content from Agent Studio" in appr["diff"]
+
+    # Check done status is interrupted
+    done_data = [e["data"] for e in events if e["event"] == "done"][0]
+    assert done_data["status"] == "interrupted"
+    assert done_data["actionId"] == appr["actionId"]
+
+
+def test_chat_approval_endpoint_resumes_execution_on_approve(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    token = register_user("approval_approve@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Trigger interrupt
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Create and write docs/test_edit.txt", "mode": "agent"},
+    )
+    events = parse_sse_blocks(res.text)
+    appr = [e["data"] for e in events if e["event"] == "approval_required"][0]
+    action_id = appr["actionId"]
+
+    # Call POST /chat/approval with approve
+    res_appr = client.post(
+        "/chat/approval",
+        headers=headers,
+        json={"actionId": action_id, "decision": "approve"},
+    )
+    assert res_appr.status_code == 200
+    resume_events = parse_sse_blocks(res_appr.text)
+    resume_event_names = [e["event"] for e in resume_events]
+
+    assert "action_result" in resume_event_names
+    assert "token" in resume_event_names
+    assert "done" in resume_event_names
+
+    ar = [e["data"] for e in resume_events if e["event"] == "action_result"][0]
+    assert ar["actionId"] == action_id
+    assert "Successfully updated" in ar["output"]
+
+    done_ev = [e["data"] for e in resume_events if e["event"] == "done"][0]
+    assert done_ev["status"] == "completed"
+
+    # Verify file actually created on disk
+    target_file = tmp_path / "docs" / "test_edit.txt"
+    assert target_file.exists()
+    assert "Updated content from Agent Studio" in target_file.read_text(encoding="utf-8")
+
+
+def test_chat_approval_endpoint_handles_modify_and_reject_with_feedback(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    token = register_user("approval_modify_reject@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Test Modify decision
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Write docs/test_edit.txt with draft content", "mode": "agent"},
+    )
+    events = parse_sse_blocks(res.text)
+    appr = [e["data"] for e in events if e["event"] == "approval_required"][0]
+    action_id = appr["actionId"]
+
+    res_modify = client.post(
+        "/chat/approval",
+        headers=headers,
+        json={
+            "actionId": action_id,
+            "decision": "modify",
+            "modifiedParams": {
+                "path": "docs/custom_edit.txt",
+                "content": "Customized user content after human review",
+                "mode": "write",
+            },
+        },
+    )
+    assert res_modify.status_code == 200
+    mod_events = parse_sse_blocks(res_modify.text)
+    mod_done = [e["data"] for e in mod_events if e["event"] == "done"][0]
+    assert mod_done["status"] == "completed"
+
+    custom_file = tmp_path / "docs" / "custom_edit.txt"
+    assert custom_file.exists()
+    assert "Customized user content after human review" in custom_file.read_text(encoding="utf-8")
+
+    # Test Reject decision with feedback
+    res_rej_stream = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Edit docs/protected.txt", "mode": "agent"},
+    )
+    rej_events = parse_sse_blocks(res_rej_stream.text)
+    rej_appr = [e["data"] for e in rej_events if e["event"] == "approval_required"][0]
+    rej_action_id = rej_appr["actionId"]
+
+    res_reject = client.post(
+        "/chat/approval",
+        headers=headers,
+        json={
+            "actionId": rej_action_id,
+            "decision": "reject",
+            "feedback": "Do not edit this protected file under any circumstances.",
+        },
+    )
+    assert res_reject.status_code == 200
+    reject_events = parse_sse_blocks(res_reject.text)
+    reject_results = [e["data"] for e in reject_events if e["event"] == "action_result"]
+    assert len(reject_results) >= 1
+    assert "Action rejected by user" in reject_results[0]["output"]
+    assert "Do not edit this protected file" in reject_results[0]["output"]
+
+    # Verify protected file was NOT created
+    protected_file = tmp_path / "docs" / "protected.txt"
+    assert not protected_file.exists()
+
+    # Verify agent re-planned
+    token_events = [e["data"] for e in reject_events if e["event"] == "token"]
+    full_text = "".join(t["token"] for t in token_events)
+    assert "Re-planning" in full_text or "acknowledged" in full_text
+
+
+def test_pending_approval_persists_and_restored(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    token = register_user("persists_approval@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Modify docs/persistent.txt", "mode": "agent"},
+    )
+    events = parse_sse_blocks(res.text)
+    appr = [e["data"] for e in events if e["event"] == "approval_required"][0]
+    conv_id = [e["data"] for e in events if e["event"] == "done"][0]["conversationId"]
+
+    # Fetch pending approval for this conversation
+    pending_res = client.get(f"/chat/{conv_id}/approval", headers=headers)
+    assert pending_res.status_code == 200
+    pending_data = pending_res.json()
+    assert pending_data is not None
+    assert pending_data["actionId"] == appr["actionId"]
+    assert pending_data["tool"] == "edit_workspace_file"
+    assert pending_data["status"] == "pending"
+    assert "test_edit.txt" in str(pending_data["parameters"]) or "persistent.txt" in str(pending_data["parameters"])
+
+    # Resolve approval
+    client.post(
+        "/chat/approval",
+        headers=headers,
+        json={"actionId": appr["actionId"], "decision": "approve"},
+    )
+
+    # Check that pending approval is now None
+    after_res = client.get(f"/chat/{conv_id}/approval", headers=headers)
+    assert after_res.status_code == 200
+    assert after_res.json() is None
+
+
 
 

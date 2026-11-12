@@ -152,3 +152,27 @@ class UserMemory(Base):
 
     def __repr__(self):
         return f"<UserMemory(id={self.id}, user_id={self.user_id}, category='{self.category}')>"
+
+
+class AgentApproval(Base):
+    """Pending or resolved Human-In-The-Loop approval request for Tier 2/3 tools"""
+    __tablename__ = "agent_approvals"
+
+    id = Column(String, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    tool_name = Column(String, nullable=False)
+    tier = Column(Integer, default=2, nullable=False)
+    parameters = Column(Text, nullable=False)
+    rationale = Column(Text, nullable=False)
+    diff = Column(Text, nullable=True)
+    status = Column(String, default="pending", nullable=False)
+    user_feedback = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    conversation = relationship("Conversation", backref="approvals")
+    user = relationship("User", backref="approvals")
+
+    def __repr__(self):
+        return f"<AgentApproval(id='{self.id}', tool='{self.tool_name}', status='{self.status}')>"

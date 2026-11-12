@@ -1,7 +1,10 @@
 import os
+import difflib
+import uuid
 from pathlib import Path
 from typing import List, Dict, Optional
 from langchain_core.tools import tool
+from langgraph.types import interrupt
 
 MAX_TOOL_OUTPUT_CHARS = 4000
 
@@ -242,12 +245,117 @@ def search_workspace_symbols(query: str, path: str = ".") -> str:
     return truncate_tool_output("\n".join(matches))
 
 
+@tool
+def edit_workspace_file(
+    path: str,
+    content: str,
+    mode: str = "write",
+    rationale: str = "Modifying workspace file",
+) -> str:
+    """
+    Create or modify a workspace text file with human-in-the-loop approval.
+    path: relative path to the file within workspace root
+    content: full text content to write or append
+    mode: write mode ('write' to replace or create, 'append' to append)
+    rationale: explanation of why this file mutation is needed
+    """
+    try:
+        resolved = resolve_workspace_path(path)
+    except ValueError as exc:
+        return f"Error: {str(exc)}"
+
+    old_lines = []
+    old_content = ""
+    if resolved.exists():
+        if not resolved.is_file():
+            return f"Error: '{path}' is not a regular file."
+        try:
+            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                old_lines = f.readlines()
+                old_content = "".join(old_lines)
+        except Exception as exc:
+            return f"Error reading existing file '{path}': {str(exc)}"
+
+    effective_mode = (mode or "write").lower()
+    if effective_mode == "append":
+        target_content = old_content + content
+    else:
+        target_content = content
+
+    new_lines = target_content.splitlines(keepends=True)
+    if new_lines and not new_lines[-1].endswith("\n"):
+        new_lines[-1] += "\n"
+    if old_lines and not old_lines[-1].endswith("\n"):
+        old_lines[-1] += "\n"
+
+    diff_lines = list(
+        difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm="\n",
+        )
+    )
+    diff_text = "".join(diff_lines) if diff_lines else "(No textual changes)"
+
+    action_id = f"act_{uuid.uuid4().hex[:8]}"
+    interrupt_payload = {
+        "actionId": action_id,
+        "tool": "edit_workspace_file",
+        "tier": 2,
+        "parameters": {
+            "path": path,
+            "content": content,
+            "mode": effective_mode,
+        },
+        "rationale": rationale,
+        "diff": diff_text,
+    }
+
+    resume_payload = interrupt(interrupt_payload)
+    if not isinstance(resume_payload, dict):
+        resume_payload = {}
+
+    decision = str(resume_payload.get("decision", "approve")).lower()
+    if decision == "reject":
+        feedback = resume_payload.get("feedback") or "Action rejected by user"
+        return f"Action rejected by user. Feedback: {feedback}"
+
+    final_path = path
+    final_content = content
+    final_mode = effective_mode
+
+    if decision == "modify":
+        modified_params = resume_payload.get("modifiedParams") or {}
+        final_path = modified_params.get("path", final_path)
+        final_content = modified_params.get("content", final_content)
+        final_mode = str(modified_params.get("mode", final_mode)).lower()
+
+    try:
+        final_resolved = resolve_workspace_path(final_path)
+    except ValueError as exc:
+        return f"Error: {str(exc)}"
+
+    try:
+        final_resolved.parent.mkdir(parents=True, exist_ok=True)
+        write_flag = "a" if final_mode == "append" else "w"
+        with open(final_resolved, write_flag, encoding="utf-8") as f:
+            f.write(final_content)
+    except Exception as exc:
+        return f"Error writing to file '{final_path}': {str(exc)}"
+
+    return f"Successfully updated '{final_path}'."
+
+
 TIER_1_TOOLS = [read_workspace_file, list_workspace_directory, search_workspace_symbols]
+TIER_2_TOOLS = [edit_workspace_file]
 
 TOOL_CAPABILITY_TIERS: Dict[str, int] = {
     "read_workspace_file": 1,
     "list_workspace_directory": 1,
     "search_workspace_symbols": 1,
+    "edit_workspace_file": 2,
 }
 
 TOOL_TIERS = TOOL_CAPABILITY_TIERS

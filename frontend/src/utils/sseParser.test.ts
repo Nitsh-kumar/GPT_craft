@@ -116,3 +116,27 @@ test("parses full cyclical agent action call and action result telemetry cycle",
     assert.equal(events[4].totalSteps, 2);
   }
 });
+
+test("parses approval_required event envelope with diff, actionId, and rationale", () => {
+  const raw = [
+    `event: approval_required\ndata: {"actionId":"act_99","tool":"edit_workspace_file","tier":2,"parameters":{"path":"docs/notes.txt","content":"New content"},"rationale":"Updating documentation","diff":"--- a/docs/notes.txt\\n+++ b/docs/notes.txt\\n@@ -1 +1 @@\\n-Old\\n+New content"}`,
+    `event: done\ndata: {"status":"interrupted","totalSteps":1,"conversationId":"202"}`,
+  ].join("\n\n") + "\n\n";
+
+  const { events } = parseSseBuffer("", raw, true);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].type, "approval_required");
+  if (events[0].type === "approval_required") {
+    assert.equal(events[0].actionId, "act_99");
+    assert.equal(events[0].tool, "edit_workspace_file");
+    assert.equal(events[0].tier, 2);
+    assert.equal(events[0].parameters.path, "docs/notes.txt");
+    assert.equal(events[0].rationale, "Updating documentation");
+    assert.ok(events[0].diff?.includes("+New content"));
+  }
+  assert.equal(events[1].type, "done");
+  if (events[1].type === "done") {
+    assert.equal(events[1].status, "interrupted");
+    assert.equal(events[1].conversationId, "202");
+  }
+});

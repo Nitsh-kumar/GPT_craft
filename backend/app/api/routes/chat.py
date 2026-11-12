@@ -1,6 +1,7 @@
+import json
 from fastapi import APIRouter, Depends, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from typing import List
+from typing import List, Optional
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from slowapi import Limiter
@@ -13,6 +14,8 @@ from app.schemas.chat import (
     MessageResponse,
     ModelInfoResponse,
     QuotaResponse,
+    ApprovalDecisionRequest,
+    ApprovalPendingResponse,
 )
 from app.services.chat import ChatService
 from app.services.auth import AuthService
@@ -95,6 +98,58 @@ def get_history(conversation_id: int, current_user: User = Depends(get_current_u
     if not conversation or conversation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ChatCRUD.get_messages_for_conversation(db, conversation_id)
+
+
+@router.post("/approval")
+def chat_approval_endpoint(
+    body: ApprovalDecisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Resume agent execution after approving, modifying, or rejecting a Tier 2 action"""
+    generator = ChatService.resume_approval(
+        db=db,
+        user_id=current_user.id,
+        action_id=body.actionId,
+        decision=body.decision,
+        modified_params=body.modifiedParams,
+        feedback=body.feedback,
+    )
+    return StreamingResponse(generator, media_type="text/event-stream")
+
+
+@router.get("/{conversation_id}/approval", response_model=Optional[ApprovalPendingResponse])
+def get_pending_approval_endpoint(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get active pending approval request for a conversation if one exists"""
+    conversation = ChatCRUD.get_conversation(db, conversation_id)
+    if not conversation or conversation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    approval = ChatCRUD.get_pending_approval(db, conversation_id, current_user.id)
+    if not approval:
+        return None
+
+    params = {}
+    try:
+        params = json.loads(approval.parameters)
+    except Exception:
+        params = {"raw": approval.parameters}
+
+    return ApprovalPendingResponse(
+        actionId=approval.id,
+        conversationId=approval.conversation_id,
+        tool=approval.tool_name,
+        toolName=approval.tool_name,
+        tier=approval.tier,
+        parameters=params,
+        rationale=approval.rationale,
+        diff=approval.diff,
+        status=approval.status,
+    )
 
 
 @router.delete("/{conversation_id}", status_code=204)

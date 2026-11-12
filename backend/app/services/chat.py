@@ -1,8 +1,10 @@
 import json
+import uuid
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, ToolMessage
 from typing import Optional, Generator
+from langgraph.types import Command
 from app.db.crud_token import TokenUsageCRUD
 from app.db.crud_chat import ChatCRUD
 from app.schemas.chat import ChatResponse
@@ -83,6 +85,7 @@ class ChatService:
         user_tier: str,
         model_id: Optional[str],
         effective_mode: str,
+        conversation_id: Optional[int] = None,
     ) -> tuple[dict, dict]:
         input_state = {
             "messages": formatted_history,
@@ -97,6 +100,8 @@ class ChatService:
                 "mode": effective_mode,
             }
         }
+        if conversation_id is not None:
+            config["configurable"]["thread_id"] = str(conversation_id)
         return input_state, config
 
     @staticmethod
@@ -141,6 +146,7 @@ class ChatService:
             user_tier,
             model_id,
             effective_mode,
+            conversation_id=conv_id,
         )
 
         try:
@@ -245,6 +251,7 @@ class ChatService:
             user_tier,
             model_id,
             effective_mode,
+            conversation_id=conv_id,
         )
 
         if is_agent_mode:
@@ -317,6 +324,69 @@ class ChatService:
             yield ChatService._format_sse_error(is_agent_mode, f"Error generating AI response: {str(exc)}")
             return
 
+        # Check for LangGraph checkpoint interrupt (HITL for Tier 2/3 tools)
+        if is_agent_mode:
+            try:
+                state = agent.get_state(config)
+                interrupt_item = None
+                for task in getattr(state, "tasks", []):
+                    for intr in getattr(task, "interrupts", []):
+                        interrupt_item = intr.value
+                        break
+                    if interrupt_item:
+                        break
+
+                if interrupt_item:
+                    action_id = interrupt_item.get("actionId") or f"act_{uuid.uuid4().hex[:8]}"
+                    tool_name = interrupt_item.get("tool") or "edit_workspace_file"
+                    tier = interrupt_item.get("tier", 2)
+                    parameters = interrupt_item.get("parameters", {})
+                    rationale = interrupt_item.get("rationale", "")
+                    diff = interrupt_item.get("diff", "")
+
+                    ChatCRUD.create_or_update_approval(
+                        db=db,
+                        action_id=action_id,
+                        conversation_id=conv_id,
+                        user_id=user_id,
+                        tool_name=tool_name,
+                        tier=tier,
+                        parameters=parameters,
+                        rationale=rationale,
+                        diff=diff,
+                    )
+
+                    yield ChatService._format_sse_event(
+                        "approval_required",
+                        {
+                            "actionId": action_id,
+                            "tool": tool_name,
+                            "toolName": tool_name,
+                            "tier": tier,
+                            "parameters": parameters,
+                            "rationale": rationale,
+                            "diff": diff,
+                        },
+                    )
+
+                    resolved_model = model_id or "llama3-8b-8192"
+                    user_limit = TokenUsageCRUD.get_user_limit(db, user_id)
+                    remaining = user_limit.daily_limit if user_limit else 0
+                    done_envelope = {
+                        "status": "interrupted",
+                        "actionId": action_id,
+                        "totalSteps": max(1, step_count),
+                        "conversationId": conv_id,
+                        "tokensUsed": len(message.split()),
+                        "tokensRemaining": remaining,
+                        "modelUsed": resolved_model,
+                        "modeUsed": effective_mode,
+                    }
+                    yield ChatService._format_sse_event("done", done_envelope)
+                    return
+            except Exception:
+                pass
+
         response_content = "".join(accumulated_chunks)
         tokens_used = len(message.split()) + len(response_content.split())
 
@@ -352,3 +422,184 @@ class ChatService:
             "mode_used": effective_mode,
         }
         yield ChatService._format_sse_event(None, done_payload)
+
+    @staticmethod
+    def resume_approval(
+        db: Session,
+        user_id: int,
+        action_id: str,
+        decision: str,
+        modified_params: Optional[dict] = None,
+        feedback: Optional[str] = None,
+    ) -> Generator[str, None, None]:
+        """
+        Resumes an interrupted LangGraph checkpoint after user approves,
+        modifies, or rejects a Tier 2 action.
+        """
+        approval = ChatCRUD.get_approval_by_id(db, action_id, user_id=user_id)
+        if not approval:
+            yield ChatService._format_sse_error(True, "Approval request not found or unauthorized.")
+            return
+
+        if approval.status != "pending":
+            yield ChatService._format_sse_error(True, f"Approval request is already {approval.status}.")
+            return
+
+        # Update approval in DB
+        ChatCRUD.resolve_approval(db, action_id, decision=decision, feedback=feedback)
+
+        conversation_id = approval.conversation_id
+        user_limit = TokenUsageCRUD.get_user_limit(db, user_id)
+        if user_limit and user_limit.daily_limit <= 0:
+            yield ChatService._format_sse_error(True, "Daily token limit exceeded.")
+            return
+
+        resume_payload = {
+            "decision": decision,
+            "modifiedParams": modified_params or {},
+            "feedback": feedback or "",
+        }
+
+        config = {
+            "configurable": {
+                "thread_id": str(conversation_id),
+                "user_id": user_id,
+                "mode": "agent",
+            }
+        }
+
+        step_count = 0
+        accumulated_chunks = []
+        last_tool_output = ""
+
+        try:
+            for item in agent.stream(Command(resume=resume_payload), config=config, stream_mode="messages"):
+                msg_obj = item[0] if isinstance(item, tuple) else item
+
+                tool_calls = getattr(msg_obj, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        tc_id = tc.get("id") or f"act_{step_count + 1}"
+                        tc_name = tc.get("name") or ""
+                        tier = get_tool_tier(tc_name)
+                        yield ChatService._format_sse_event(
+                            "action_call",
+                            {
+                                "actionId": tc_id,
+                                "tool": tc_name,
+                                "args": tc.get("args", {}),
+                                "tier": tier,
+                            },
+                        )
+                    continue
+
+                if isinstance(msg_obj, ToolMessage):
+                    step_count += 1
+                    out_str = truncate_tool_output(str(msg_obj.content))
+                    last_tool_output = out_str
+                    yield ChatService._format_sse_event(
+                        "action_result",
+                        {
+                            "actionId": action_id,
+                            "tool": approval.tool_name,
+                            "output": out_str,
+                        },
+                    )
+                    continue
+
+                content = getattr(msg_obj, "content", "")
+                if not content:
+                    continue
+
+                if isinstance(msg_obj, AIMessageChunk):
+                    accumulated_chunks.append(content)
+                    yield ChatService._format_token_chunk(True, content)
+                elif isinstance(msg_obj, AIMessage):
+                    words = content.split(" ")
+                    for idx, word in enumerate(words):
+                        chunk_str = (" " if idx > 0 else "") + word
+                        accumulated_chunks.append(chunk_str)
+                        yield ChatService._format_token_chunk(True, chunk_str)
+        except Exception as exc:
+            yield ChatService._format_sse_error(True, f"Error resuming agent: {str(exc)}")
+            return
+
+        # Check if there is another interrupt
+        state = agent.get_state(config)
+        next_interrupt = None
+        for task in getattr(state, "tasks", []):
+            for intr in getattr(task, "interrupts", []):
+                next_interrupt = intr.value
+                break
+            if next_interrupt:
+                break
+
+        if next_interrupt:
+            next_action_id = next_interrupt.get("actionId") or f"act_{uuid.uuid4().hex[:8]}"
+            next_tool = next_interrupt.get("tool") or "edit_workspace_file"
+            next_tier = next_interrupt.get("tier", 2)
+            next_params = next_interrupt.get("parameters", {})
+            next_rationale = next_interrupt.get("rationale", "")
+            next_diff = next_interrupt.get("diff", "")
+
+            ChatCRUD.create_or_update_approval(
+                db=db,
+                action_id=next_action_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                tool_name=next_tool,
+                tier=next_tier,
+                parameters=next_params,
+                rationale=next_rationale,
+                diff=next_diff,
+            )
+
+            yield ChatService._format_sse_event(
+                "approval_required",
+                {
+                    "actionId": next_action_id,
+                    "tool": next_tool,
+                    "toolName": next_tool,
+                    "tier": next_tier,
+                    "parameters": next_params,
+                    "rationale": next_rationale,
+                    "diff": next_diff,
+                },
+            )
+            done_envelope = {
+                "status": "interrupted",
+                "actionId": next_action_id,
+                "totalSteps": max(1, step_count),
+                "conversationId": conversation_id,
+                "tokensUsed": 10,
+                "tokensRemaining": user_limit.daily_limit if user_limit else 0,
+                "modelUsed": "llama3-8b-8192",
+                "modeUsed": "agent",
+            }
+            yield ChatService._format_sse_event("done", done_envelope)
+            return
+
+        response_content = "".join(accumulated_chunks)
+        if not response_content.strip():
+            response_content = f"Action '{approval.tool_name}' {decision}ed: {last_tool_output}"
+
+        tokens_used = max(10, len(response_content.split()))
+        tokens_remaining = ChatService._finalize_turn(
+            db=db,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message=f"[{decision.upper()}] {approval.tool_name}",
+            response_content=response_content,
+            tokens_used=tokens_used,
+        )
+
+        done_envelope = {
+            "status": "completed",
+            "totalSteps": max(1, step_count + 1),
+            "conversationId": conversation_id,
+            "tokensUsed": tokens_used,
+            "tokensRemaining": tokens_remaining,
+            "modelUsed": "llama3-8b-8192",
+            "modeUsed": "agent",
+        }
+        yield ChatService._format_sse_event("done", done_envelope)

@@ -51,12 +51,21 @@ export const useChat = () => {
     setIsGenerating(true);
     try {
       const history = await chatService.getHistory(id);
-      const mapped = history.map((msg: any) => ({
+      const mapped: Message[] = history.map((msg: any) => ({
         id: msg.id.toString(),
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
         timestamp: msg.created_at
       }));
+      try {
+        const pending = await chatService.getPendingApproval(id);
+        if (pending && mapped.length > 0) {
+          const lastMsg = mapped[mapped.length - 1];
+          lastMsg.approvalRequired = pending;
+        }
+      } catch (e) {
+        console.warn('Failed to load pending approval', e);
+      }
       setMessages(mapped);
     } catch (err) {
       console.error('Failed to load history', err);
@@ -185,6 +194,24 @@ export const useChat = () => {
                 };
               })
             );
+          } else if (event.type === 'approval_required') {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? {
+                      ...msg,
+                      approvalRequired: {
+                        actionId: event.actionId,
+                        tool: event.tool,
+                        tier: event.tier,
+                        parameters: event.parameters,
+                        rationale: event.rationale,
+                        diff: event.diff,
+                      },
+                    }
+                  : msg
+              )
+            );
           }
         }
       );
@@ -214,6 +241,114 @@ export const useChat = () => {
     }
   }, []);
 
+  const handleApprovalDecision = useCallback(
+    async (
+      actionId: string,
+      decision: 'approve' | 'modify' | 'reject',
+      modifiedParams?: Record<string, unknown>,
+      feedback?: string
+    ) => {
+      setIsGenerating(true);
+      setError(null);
+      abortControllerRef.current = new AbortController();
+
+      let targetMessageId: string | null = null;
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.approvalRequired?.actionId === actionId) {
+            targetMessageId = msg.id;
+            return { ...msg, approvalRequired: undefined };
+          }
+          return msg;
+        })
+      );
+
+      try {
+        await chatService.submitApproval(
+          actionId,
+          decision,
+          modifiedParams,
+          feedback,
+          (chunk) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === targetMessageId
+                  ? { ...msg, content: (msg.content || '') + chunk }
+                  : msg
+              )
+            );
+          },
+          (event) => {
+            if (event.type === 'action_result') {
+              setMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.id !== targetMessageId) return msg;
+                  const currentActions = msg.actions || [];
+                  const idx = currentActions.findIndex((a) => a.actionId === event.actionId);
+                  if (idx >= 0) {
+                    const updated = [...currentActions];
+                    updated[idx] = { ...updated[idx], output: event.output };
+                    return { ...msg, actions: updated };
+                  }
+                  return {
+                    ...msg,
+                    actions: [
+                      ...currentActions,
+                      {
+                        actionId: event.actionId,
+                        tool: event.tool,
+                        args: {},
+                        tier: 2,
+                        output: event.output,
+                      },
+                    ],
+                  };
+                })
+              );
+            } else if (event.type === 'approval_required') {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === targetMessageId
+                    ? {
+                        ...msg,
+                        approvalRequired: {
+                          actionId: event.actionId,
+                          tool: event.tool,
+                          tier: event.tier,
+                          parameters: event.parameters,
+                          rationale: event.rationale,
+                          diff: event.diff,
+                        },
+                      }
+                    : msg
+                )
+              );
+            } else if (event.type === 'thought') {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === targetMessageId
+                    ? { ...msg, thoughts: [...(msg.thoughts || []), event.thought] }
+                    : msg
+                )
+              );
+            }
+          },
+          abortControllerRef.current.signal
+        );
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log('Approval stream aborted');
+        } else {
+          setError(err.message || 'Error executing approval decision');
+        }
+      } finally {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
+    },
+    []
+  );
+
   const clearChat = useCallback(() => {
     setMessages([]);
     setError(null);
@@ -233,6 +368,7 @@ export const useChat = () => {
     setSelectedModel,
     setSelectedMode,
     sendMessage,
+    handleApprovalDecision,
     stopGeneration,
     clearChat,
     selectConversation,

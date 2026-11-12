@@ -1,14 +1,16 @@
+import uuid
 from typing import List, Optional
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm, CRAFT_MODES, LocalCraftLLM
-from app.ai.tools.workspace import TIER_1_TOOLS
+from app.ai.tools.workspace import TIER_1_TOOLS, TIER_2_TOOLS
 
-# Define tools here
-tools = list(TIER_1_TOOLS)
+# Define tools here (Tier 1 read-only tools + Tier 2 HITL file mutation tools)
+tools = list(TIER_1_TOOLS) + list(TIER_2_TOOLS)
 
 # Maximum messages kept in the sliding context window (plus system prompt)
 MAX_CONTEXT_MESSAGES = 10
@@ -103,5 +105,42 @@ graph_builder.add_conditional_edges("chatbot", tools_condition)
 # Add cyclical edge back to chatbot
 graph_builder.add_edge("tools", "chatbot")
 
-# Compile the agent
-agent = graph_builder.compile()
+# Compile the agent with in-memory checkpointing for HITL interrupts
+checkpointer = MemorySaver()
+compiled_graph = graph_builder.compile(checkpointer=checkpointer)
+
+
+class CheckpointedAgentWrapper:
+    """
+    Transparent proxy for CompiledStateGraph that ensures a thread_id
+    is always present in configurable, allowing both thread-bound conversation
+    sessions and direct standalone test invocations.
+    """
+    def __init__(self, inner):
+        self._inner = inner
+
+    def _ensure_config(self, config):
+        c = dict(config or {})
+        configurable = dict(c.get("configurable", {}))
+        if "thread_id" not in configurable:
+            configurable["thread_id"] = f"thread_{uuid.uuid4().hex[:8]}"
+        c["configurable"] = configurable
+        return c
+
+    def invoke(self, input, config=None, **kwargs):
+        return self._inner.invoke(input, config=self._ensure_config(config), **kwargs)
+
+    def stream(self, input, config=None, **kwargs):
+        return self._inner.stream(input, config=self._ensure_config(config), **kwargs)
+
+    def get_state(self, config=None, **kwargs):
+        return self._inner.get_state(self._ensure_config(config), **kwargs)
+
+    def update_state(self, config=None, *args, **kwargs):
+        return self._inner.update_state(self._ensure_config(config), *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+agent = CheckpointedAgentWrapper(compiled_graph)

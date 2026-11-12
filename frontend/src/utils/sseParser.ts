@@ -7,10 +7,12 @@ interface RawSsePayload {
   content?: string;
   actionId?: string;
   tool?: string;
+  toolName?: string;
   args?: Record<string, unknown>;
   tier?: number;
   parameters?: Record<string, unknown>;
   rationale?: string;
+  diff?: string;
   output?: string;
   status?: string;
   totalSteps?: number;
@@ -40,7 +42,7 @@ function normalizeEnvelope(eventName: string | null, data: RawSsePayload): SseEv
       return {
         type: 'action_call',
         actionId: String(data.actionId ?? ''),
-        tool: String(data.tool ?? ''),
+        tool: String(data.tool ?? data.toolName ?? ''),
         args: data.args ?? {},
         tier: Number(data.tier ?? 1),
       };
@@ -48,10 +50,11 @@ function normalizeEnvelope(eventName: string | null, data: RawSsePayload): SseEv
       return {
         type: 'approval_required',
         actionId: String(data.actionId ?? ''),
-        tool: String(data.tool ?? ''),
+        tool: String(data.tool ?? data.toolName ?? ''),
         tier: Number(data.tier ?? 2),
         parameters: data.parameters ?? {},
         rationale: String(data.rationale ?? ''),
+        diff: typeof data.diff === 'string' ? data.diff : undefined,
       };
     case 'action_result':
       return {

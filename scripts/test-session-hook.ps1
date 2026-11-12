@@ -25,6 +25,6 @@ $failure = ConvertTo-ProjectMemoryStatus -Raw '{"status":"success","data":[]}' -
 if ($failure -notlike 'lookup failed*') { throw 'Nonzero CLI exit reported as success' }
 $success = ConvertTo-ProjectMemoryStatus -Raw '{"status":"success","data":[{"memory":"GPTCraft password=private-value"},{"memory":"Unrelated personal fact"}]}' -ExitCode 0
 if ($success -notlike 'retrieved 1 project facts*' -or $success.Contains('private-value')) {
-    throw 'Memory summary leaked text or included unrelated facts'
+    throw "Memory summary mismatch (expected one project fact, actual status: $success)"
 }
 Write-Host 'Memory diagnostics distinguish failures and never print raw facts.'

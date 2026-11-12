@@ -4,7 +4,11 @@ function ConvertTo-ProjectMemoryStatus {
     try {
         $parsed = $Raw | ConvertFrom-Json -ErrorAction Stop
         if ($parsed.status -ne 'success') { return 'lookup failed (continuing without memory)' }
-        $entries = if ($parsed.data.results) { $parsed.data.results } else { $parsed.data }
+        $entries = @()
+        if ($parsed.data -is [System.Array]) { $entries = @($parsed.data) }
+        elseif ($null -ne $parsed.data -and $parsed.data.PSObject.Properties.Name -contains 'results') {
+            $entries = @($parsed.data.results)
+        }
         $count = @($entries | Where-Object { $_.memory -match '\bGPTCraft\b' }).Count
         # Status only: untrusted memory text may contain credentials. Retrieve
         # selected project facts deliberately through the helper, never stdout.

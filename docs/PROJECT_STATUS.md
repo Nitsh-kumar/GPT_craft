@@ -1,26 +1,46 @@
 # Project Status
 
-Updated: 10 November 2026
+Updated: 12 November 2026
 
-## Completed in Monorepo Merge & Harness Pass
+## Completed Milestones
 
-1. **Unified Monorepo (`main` branch)**:
-   - Merged `backend` and `origin/frontend` into a clean `backend/` + `frontend/` monorepo structure while preserving Git history from both branches.
-   - Removed duplicate root OpenAPI dumps (`openapi*.json`), accidental `app/db/__init__,py` typo file, and unused server/AI packages from `frontend/package.json`.
-2. **Contract & Build Fixes**:
-   - Added missing `langgraph`, `langchain-core`, and `pytest` dependencies to `backend/requirements.txt`.
-   - Fixed `POST /auth/register` to return an `AuthResponse` (`accessToken`, `tokenType`, `user`) matching `frontend/src/context/AuthContext.tsx`.
-   - Fixed `useQuota.ts` 0-argument `chatService.getQuota()` call and aligned `User.id` typing (`string | number`).
-   - Wired `model` selection from `frontend/src/services/chatService.ts` through `ChatRequest` -> `ChatService` -> LangGraph `chatbot_node` -> `get_llm()`.
-   - Fixed `chat.py` attribute bug (`current_user.plan` on `UserResponse`) and added inactive-user (`403 Forbidden`) check to `AuthService.get_user_by_token`.
-3. **AGY CLI Harness**:
-   - Added root and directory-scoped `AGENTS.md` rule files.
-   - Added `.agents/skills/gptcraft-verify` and `.agents/skills/gptcraft-dev` skills.
-   - Added `.agents/hooks.json` (`SessionStart` hook) and `scripts/verify.ps1` + `backend/tests/test_api.py`.
+1. **Unified Monorepo & Initial Harness**:
+   - Merged backend and frontend into a unified `backend/` + `frontend/` monorepo structure while preserving Git history.
+   - Cleaned root dumps, dependencies, and contract mismatches across FastAPI and React 19.
+   - Implemented root and directory-scoped `AGENTS.md` rules, AGY skills (`gptcraft-verify`, `gptcraft-dev`), and unified verification script (`scripts/verify.ps1`).
 
-## Next Production Milestones
+2. **Real-Time SSE Token Streaming**:
+   - Replaced simulated client-side word delay in `chatService.ts` with true server-driven Server-Sent Events (`text/event-stream`).
+   - Integrated FastAPI `StreamingResponse` with LangGraph async streaming, supporting graceful client abortion (`AbortController`).
 
-1. **Real SSE / WebSocket Token Streaming**: Replace simulated client-side word delay in `chatService.ts` with FastAPI `StreamingResponse` + LangGraph `.astream_events()`.
-2. **Database Migrations**: Add Alembic migrations to `backend/` and remove `Base.metadata.create_all` from startup.
-3. **Atomic Quota Reservation & Rate Limiting**: Apply SlowAPI limiter decorators to `/chat` and use atomic SQL updates for token deduction.
-4. **Unique Differentiator Features**: Expand the LangGraph `agent.py` state machine with custom tools, branching workflows, or artifact/canvas generation.
+3. **Native Personalization & Long-Term Memory**:
+   - Implemented native in-database `UserPreferences` and `UserMemory` SQLAlchemy models with support for both SQLite and PostgreSQL.
+   - Built hybrid auto-extraction memory pipeline with explicit memory management endpoints (`/users/me/preferences`, `/users/me/memories`).
+   - Integrated Mem0 long-term memory retrieval into agent context at session startup.
+   - Added React 19 Memory Management Modal in the frontend sidebar for user inspection, editing, and deletion of stored preferences and memories.
+
+4. **Epic #11 Ticket 1 (#12): Agent Studio Mode Switcher & Typed SSE Protocol Envelope Foundation**:
+   - Added `agent` mode to craft switcher alongside `standard`, `architect`, `code`, and `brainstorm`.
+   - Defined typed SSE event envelopes (`thought`, `action_call`, `approval_required`, `action_result`, `token`, `done`, `error`) for agent execution.
+   - Implemented resilient client-side streaming parser (`frontend/src/utils/sseParser.ts`) with chunk buffering, CRLF handling, and legacy conversational fallback.
+   - Added unit test suite (`frontend/src/utils/sseParser.test.ts`) integrated into `npm run test:unit` and `scripts/verify.ps1`.
+
+---
+
+## Active Epic #11: Stateful Autonomous Personal Agent Platform
+
+Tracking implementation against `docs/specs/personal_agent_platform_spec.md`, `docs/adr/0002-personal-agent-execution-boundaries.md`, and `docs/adr/0003-hitl-interruption-and-approval-protocol.md`.
+
+- [x] **Ticket 1 (#12)**: Agent Studio Mode Switcher & Typed SSE Protocol Envelope Foundation
+- [ ] **Ticket 2 (#13)**: Cyclical LangGraph ReAct Loop & Tier 1 Workspace Tools (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`, 4,000-char truncation)
+- [ ] **Ticket 3 (#14)**: Human-In-The-Loop (HITL) Interruption & Approval Cards (LangGraph `interrupt()`, DB checkpointing, `POST /chat/approval` resumption, interactive confirmation cards)
+- [ ] **Ticket 4 (#15)**: Command Execution Guardrails & Process Timeouts (path jailing, 30-second execution timeouts, non-interactive stdin rejection)
+- [ ] **Ticket 5 (#16)**: Model Context Protocol (MCP) Client Manager (stdio and sse client manager, dynamic tool translation to LangChain structured tools)
+- [ ] **Ticket 6 (#17)**: Action Telemetry Drawer, Diff Inspector & E2E Studio Polish (collapsible telemetry drawer, syntax-highlighted diffs, e2e test suite)
+
+---
+
+## Upcoming Production Milestones
+
+1. **Database Migrations Baseline**: Formalize Alembic migrations across deployment environments.
+2. **Atomic Quota Reservation & Rate Limiting**: Apply SlowAPI limiter decorators to `/chat` and use atomic SQL updates for token deduction.

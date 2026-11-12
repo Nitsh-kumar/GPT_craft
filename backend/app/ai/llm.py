@@ -62,21 +62,35 @@ class LocalCraftLLM:
     Supports `.bind_tools()`, `.invoke()`, and `.stream()` matching LangChain ChatModel interface.
     """
 
-    def __init__(self, model_name: str, mode: str = "standard"):
+    def __init__(
+        self,
+        model_name: str,
+        mode: str = "standard",
+        bound_tools: Optional[list] = None,
+    ):
         self.model_name = model_name
         self.mode = mode.lower()
+        self._bound_tools = list(bound_tools or [])
 
     def bind_tools(self, tools: list):
-        return self
+        return LocalCraftLLM(
+            model_name=self.model_name,
+            mode=self.mode,
+            bound_tools=tools,
+        )
 
     def _generate_content(self, messages: List[BaseMessage]) -> str:
         last_user = ""
         system_text = ""
+        tool_observation = ""
         for msg in messages:
-            if msg.type == "system":
+            msg_type = getattr(msg, "type", "")
+            if msg_type == "system":
                 system_text = str(msg.content)
-            elif msg.type == "human":
+            elif msg_type == "human":
                 last_user = str(msg.content)
+            elif msg_type == "tool":
+                tool_observation = str(msg.content)
 
         mode_label = self.mode.capitalize()
         has_memory = "User Personalization & Persistent Context" in system_text
@@ -139,6 +153,12 @@ class LocalCraftLLM:
                 f"2. **Safety Policy**: Tier 1 read-only checks auto-approved; Tier 2/3 mutations gated by HITL.\n"
                 f"3. **Outcome**: Agent Studio protocol envelope ready for autonomous turn execution."
             )
+            if tool_observation:
+                obs_snippet = tool_observation[:250].strip()
+                reply += (
+                    f"\n\n#### Workspace Observation\n"
+                    f"```text\n{obs_snippet}\n```"
+                )
         else:
             reply += (
                 f"#### Core Insights\n"
@@ -149,6 +169,34 @@ class LocalCraftLLM:
         return reply
 
     def invoke(self, messages: List[BaseMessage]) -> AIMessage:
+        if self.mode == "agent" and self._bound_tools:
+            last_msg = messages[-1] if messages else None
+            if last_msg and getattr(last_msg, "type", "") == "human":
+                prompt_lower = str(last_msg.content).lower()
+                if "read" in prompt_lower or "glossary" in prompt_lower or "readme" in prompt_lower:
+                    tool_name = "read_workspace_file"
+                    target = "GLOSSARY.md" if "glossary" in prompt_lower else "README.md"
+                    tool_args = {"path": target, "start_line": 1, "end_line": 50}
+                    call_id = "call_read_1"
+                elif "search" in prompt_lower or "symbol" in prompt_lower or "find" in prompt_lower:
+                    tool_name = "search_workspace_symbols"
+                    tool_args = {"query": "ChatService", "path": "backend"}
+                    call_id = "call_search_1"
+                else:
+                    tool_name = "list_workspace_directory"
+                    tool_args = {"path": "."}
+                    call_id = "call_list_1"
+
+                return AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": tool_name,
+                        "args": tool_args,
+                        "id": call_id,
+                    }],
+                    response_metadata={"token_usage": {"total_tokens": 30}},
+                )
+
         reply = self._generate_content(messages)
         last_user = ""
         for msg in reversed(messages):

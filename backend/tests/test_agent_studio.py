@@ -173,3 +173,178 @@ def test_agent_studio_stream_error_emits_typed_error_envelope():
     error_events = [e for e in events if e["event"] == "error"]
     assert len(error_events) == 1
     assert "Simulated Groq failure" in error_events[0]["data"]["error"]
+
+
+def test_workspace_root_resolution_and_path_safety():
+    from app.ai.tools.workspace import get_workspace_root, resolve_workspace_path
+
+    root = get_workspace_root()
+    assert root.exists()
+    assert (root / "backend").exists()
+
+    # Relative to root
+    resolved = resolve_workspace_path("README.md")
+    assert resolved == (root / "README.md").resolve()
+
+    # Directory traversal rejection
+    with pytest.raises(ValueError) as exc:
+        resolve_workspace_path("../../outside.txt")
+    assert "Access denied" in str(exc.value)
+
+
+def test_tier1_workspace_tools_execution_and_safety():
+    from app.ai.tools.workspace import (
+        read_workspace_file,
+        list_workspace_directory,
+        search_workspace_symbols,
+        resolve_workspace_path,
+        TIER_1_TOOLS,
+        TOOL_TIERS,
+        TOOL_CAPABILITY_TIERS,
+        get_tool_tier,
+    )
+
+    assert len(TIER_1_TOOLS) == 3
+    assert TOOL_TIERS["read_workspace_file"] == 1
+    assert TOOL_CAPABILITY_TIERS["read_workspace_file"] == 1
+    assert get_tool_tier("read_workspace_file") == 1
+    assert get_tool_tier("list_workspace_directory") == 1
+    assert get_tool_tier("search_workspace_symbols") == 1
+
+    # Directory listing
+    dir_listing = list_workspace_directory.invoke({"path": "."})
+    entries = dir_listing.splitlines()
+    assert "backend/" in entries
+    assert ".git/" not in entries
+    assert "node_modules/" not in entries
+
+    # File reading
+    content = read_workspace_file.invoke({"path": "README.md", "start_line": 1, "end_line": 5})
+    assert "1:" in content
+    assert len(content) > 0
+
+    # Directory traversal safety via direct resolver
+    with pytest.raises(ValueError) as exc:
+        resolve_workspace_path("../../outside.txt")
+    assert "Access denied" in str(exc.value)
+
+    # Directory traversal safety via tool call
+    traversal_result = read_workspace_file.invoke({"path": "../../../secret.txt"})
+    assert "Error: Access denied" in traversal_result or "Access denied" in traversal_result
+
+    # Symbol search
+    search_result = search_workspace_symbols.invoke({"query": "ChatService", "path": "backend"})
+    assert "backend/app/services/chat.py" in search_result or "services/chat.py" in search_result
+
+
+def test_tier1_tool_output_truncation_to_4000_chars(tmp_path, monkeypatch):
+    from app.ai.tools.workspace import (
+        truncate_tool_output,
+        MAX_TOOL_OUTPUT_CHARS,
+        read_workspace_file,
+    )
+
+    short_text = "Hello world"
+    assert truncate_tool_output(short_text) == short_text
+
+    long_str = "x" * 6000
+    truncated = truncate_tool_output(long_str)
+    assert len(truncated) <= MAX_TOOL_OUTPUT_CHARS
+    assert len(truncated) == MAX_TOOL_OUTPUT_CHARS
+    assert "[Truncated to 4,000 chars]" in truncated
+
+    # Test via read_workspace_file with temporary file in isolated tmp_path
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    test_file = tmp_path / "temp_truncation_test.txt"
+    test_file.write_text("Long line of text for truncation testing.\n" * 200, encoding="utf-8")
+
+    result = read_workspace_file.invoke({"path": "temp_truncation_test.txt", "start_line": 1, "end_line": 200})
+    assert len(result) <= MAX_TOOL_OUTPUT_CHARS
+    assert "[Truncated to 4,000 chars]" in result
+
+
+def test_cyclical_react_loop_graph_execution():
+    from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+    from app.ai.graph.agent import agent
+
+    # Agent mode invokes Tier 1 tool, enters ToolNode, returns to chatbot, then ENDs
+    state = {"messages": [HumanMessage(content="Inspect the workspace files")]}
+    config = {"configurable": {"mode": "agent", "user_tier": "free", "model_id": "llama3-8b-8192"}}
+
+    result = agent.invoke(state, config=config)
+    messages = result["messages"]
+
+    assert len(messages) >= 4
+    assert isinstance(messages[0], HumanMessage)
+    assert isinstance(messages[1], AIMessage)
+    assert getattr(messages[1], "tool_calls", None) and len(messages[1].tool_calls) > 0
+    assert messages[1].tool_calls[0]["name"] == "list_workspace_directory"
+
+    assert isinstance(messages[2], ToolMessage)
+    assert "backend/" in str(messages[2].content)
+
+    assert isinstance(messages[3], AIMessage)
+    assert not (getattr(messages[3], "tool_calls", None))
+    assert "Agent Studio" in str(messages[3].content)
+
+    # Conversational mode does not invoke tools
+    std_state = {"messages": [HumanMessage(content="Explain quantum computing")]}
+    std_config = {"configurable": {"mode": "standard", "user_tier": "free"}}
+    std_result = agent.invoke(std_state, config=std_config)
+    std_messages = std_result["messages"]
+    assert len(std_messages) == 2
+    assert isinstance(std_messages[1], AIMessage)
+    assert not (getattr(std_messages[1], "tool_calls", None))
+
+
+def test_agent_react_loop_emits_action_call_and_action_result_sse_envelopes():
+    token = register_user("react_loop_stream@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Inspect the repository files and read GLOSSARY.md", "mode": "agent"},
+    )
+    assert res.status_code == 200
+    events = parse_sse_blocks(res.text)
+
+    event_names = [e["event"] for e in events]
+    assert "thought" in event_names
+    assert "action_call" in event_names
+    assert "action_result" in event_names
+    assert "token" in event_names
+    assert "done" in event_names
+
+    # Check action_call details
+    action_calls = [e["data"] for e in events if e["event"] == "action_call"]
+    assert len(action_calls) >= 1
+    ac = action_calls[0]
+    assert ac["tool"] == "read_workspace_file"
+    assert ac["tier"] == 1
+    assert "actionId" in ac
+    assert ac["args"]["path"] == "GLOSSARY.md"
+
+    # Check action_result details
+    action_results = [e["data"] for e in events if e["event"] == "action_result"]
+    assert len(action_results) >= 1
+    ar = action_results[0]
+    assert ar["actionId"] == ac["actionId"]
+    assert ar["tool"] == "read_workspace_file"
+    assert len(ar["output"]) > 0
+
+    # Check token emission and final answer
+    token_events = [e["data"] for e in events if e["event"] == "token"]
+    assert len(token_events) >= 1
+    assembled_answer = "".join(e["token"] for e in token_events)
+    assert "Agent Studio" in assembled_answer or "GPTCraft" in assembled_answer
+
+    # Check done envelope
+    done_payload = [e["data"] for e in events if e["event"] == "done"][0]
+    assert done_payload["totalSteps"] >= 2
+    assert done_payload["status"] == "completed"
+    assert done_payload["modeUsed"] == "agent"
+
+
+
+

@@ -1,13 +1,14 @@
 import json
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
+from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, ToolMessage
 from typing import Optional, Generator
 from app.db.crud_token import TokenUsageCRUD
 from app.db.crud_chat import ChatCRUD
 from app.schemas.chat import ChatResponse
 from app.ai.graph.agent import agent
 from app.ai.llm import ALLOWED_MODELS, PLAN_QUOTAS, is_tier_allowed
+from app.ai.tools import TOOL_CAPABILITY_TIERS, truncate_tool_output, get_tool_tier
 from app.services.memory import MemoryService
 
 
@@ -253,10 +254,52 @@ class ChatService:
                 {"thought": f"Analyzing goal in Agent Studio mode ({active_model})..."},
             )
 
+        emitted_tool_call_ids: set[str] = set()
+        step_count = 0
         accumulated_chunks = []
         try:
             for item in agent.stream(input_state, config=config, stream_mode="messages"):
                 msg_obj = item[0] if isinstance(item, tuple) else item
+
+                tool_calls = getattr(msg_obj, "tool_calls", None)
+                if is_agent_mode and tool_calls:
+                    if msg_obj.content and isinstance(msg_obj, AIMessage):
+                        yield ChatService._format_sse_event(
+                            "thought",
+                            {"thought": str(msg_obj.content)},
+                        )
+                    for tc in tool_calls:
+                        tc_id = tc.get("id") or f"act_{step_count + 1}"
+                        tc_name = tc.get("name") or ""
+                        if tc_name and tc_id not in emitted_tool_call_ids:
+                            emitted_tool_call_ids.add(tc_id)
+                            step_count += 1
+                            tier = get_tool_tier(tc_name)
+                            yield ChatService._format_sse_event(
+                                "action_call",
+                                {
+                                    "actionId": tc_id,
+                                    "tool": tc_name,
+                                    "args": tc.get("args", {}),
+                                    "tier": tier,
+                                },
+                            )
+                    continue
+
+                if isinstance(msg_obj, ToolMessage):
+                    if is_agent_mode:
+                        tc_id = getattr(msg_obj, "tool_call_id", "") or f"act_{step_count}"
+                        tc_name = getattr(msg_obj, "name", "") or "workspace_tool"
+                        yield ChatService._format_sse_event(
+                            "action_result",
+                            {
+                                "actionId": tc_id,
+                                "tool": tc_name,
+                                "output": truncate_tool_output(str(msg_obj.content)),
+                            },
+                        )
+                    continue
+
                 content = getattr(msg_obj, "content", "")
                 if not content:
                     continue
@@ -290,7 +333,7 @@ class ChatService:
         if is_agent_mode:
             done_envelope = {
                 "status": "completed",
-                "totalSteps": 1,
+                "totalSteps": max(1, step_count + 1),
                 "conversationId": conv_id,
                 "tokensUsed": tokens_used,
                 "tokensRemaining": tokens_remaining,

@@ -25,6 +25,13 @@ Updated: 12 November 2026
    - Implemented resilient client-side streaming parser (`frontend/src/utils/sseParser.ts`) with chunk buffering, CRLF handling, and legacy conversational fallback.
    - Added unit test suite (`frontend/src/utils/sseParser.test.ts`) integrated into `npm run test:unit` and `scripts/verify.ps1`.
 
+5. **Epic #11 Ticket 2 (#13): Cyclical LangGraph ReAct Loop & Tier 1 Workspace Tools**:
+   - Built safe, read-only Tier 1 workspace tools (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`) with root path jail enforcement and guaranteed `<= 4,000` character truncation.
+   - Configured cyclical LangGraph ReAct loop (`chatbot -> tools -> chatbot -> END`) using `ToolNode` and `tools_condition`.
+   - Emitted typed `action_call` and `action_result` SSE event envelopes with tier tags and parameters during agent tool invocation.
+   - Added frontend action telemetry components in `MessageBubble.tsx` and updated state management in `useChat.ts`.
+   - Expanded backend and frontend test suites verifying tool execution, path security, truncation, and SSE event streaming.
+
 ---
 
 ## Active Epic #11: Stateful Autonomous Personal Agent Platform
@@ -32,7 +39,7 @@ Updated: 12 November 2026
 Tracking implementation against `docs/specs/personal_agent_platform_spec.md`, `docs/adr/0002-personal-agent-execution-boundaries.md`, and `docs/adr/0003-hitl-interruption-and-approval-protocol.md`.
 
 - [x] **Ticket 1 (#12)**: Agent Studio Mode Switcher & Typed SSE Protocol Envelope Foundation
-- [ ] **Ticket 2 (#13)**: Cyclical LangGraph ReAct Loop & Tier 1 Workspace Tools (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`, 4,000-char truncation)
+- [x] **Ticket 2 (#13)**: Cyclical LangGraph ReAct Loop & Tier 1 Workspace Tools (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`, 4,000-char truncation)
 - [ ] **Ticket 3 (#14)**: Human-In-The-Loop (HITL) Interruption & Approval Cards (LangGraph `interrupt()`, DB checkpointing, `POST /chat/approval` resumption, interactive confirmation cards)
 - [ ] **Ticket 4 (#15)**: Command Execution Guardrails & Process Timeouts (path jailing, 30-second execution timeouts, non-interactive stdin rejection)
 - [ ] **Ticket 5 (#16)**: Model Context Protocol (MCP) Client Manager (stdio and sse client manager, dynamic tool translation to LangChain structured tools)

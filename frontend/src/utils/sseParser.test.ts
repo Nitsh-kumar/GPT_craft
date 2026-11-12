@@ -63,3 +63,56 @@ test("handles CRLF framing, flush without trailing blank line, and future action
   });
   assert.deepEqual(parsed.events[1], { type: "error", error: "Timeout" });
 });
+
+test("parses action_call and action_result event envelopes with full action telemetry", () => {
+  const raw = [
+    `event: action_call\ndata: {"actionId":"call_1","tool":"read_workspace_file","args":{"path":"README.md"},"tier":1}`,
+    `event: action_result\ndata: {"actionId":"call_1","tool":"read_workspace_file","output":"1: # GPTCraft"}`,
+  ].join("\n\n") + "\n\n";
+
+  const parsed = parseSseBuffer("", raw);
+  assert.equal(parsed.events.length, 2);
+  assert.deepEqual(parsed.events[0], {
+    type: "action_call",
+    actionId: "call_1",
+    tool: "read_workspace_file",
+    args: { path: "README.md" },
+    tier: 1,
+  });
+  assert.deepEqual(parsed.events[1], {
+    type: "action_result",
+    actionId: "call_1",
+    tool: "read_workspace_file",
+    output: "1: # GPTCraft",
+  });
+});
+
+test("parses full cyclical agent action call and action result telemetry cycle", () => {
+  const stream = [
+    `event: thought\ndata: {"thought":"Inspecting workspace"}`,
+    `event: action_call\ndata: {"actionId":"act_42","tool":"search_workspace_symbols","args":{"query":"ChatService"},"tier":1}`,
+    `event: action_result\ndata: {"actionId":"act_42","tool":"search_workspace_symbols","output":"backend/app/services/chat.py:14: class ChatService"}`,
+    `event: token\ndata: {"token":"Found ChatService in chat.py"}`,
+    `event: done\ndata: {"status":"completed","totalSteps":2,"conversationId":"101","modeUsed":"agent"}`,
+  ].join("\n\n") + "\n\n";
+
+  const { events } = parseSseBuffer("", stream, true);
+  assert.equal(events.length, 5);
+  assert.equal(events[0].type, "thought");
+  assert.equal(events[1].type, "action_call");
+  assert.equal(events[2].type, "action_result");
+  assert.equal(events[3].type, "token");
+  assert.equal(events[4].type, "done");
+
+  if (events[1].type === "action_call") {
+    assert.equal(events[1].tool, "search_workspace_symbols");
+    assert.equal(events[1].tier, 1);
+  }
+  if (events[2].type === "action_result") {
+    assert.equal(events[2].actionId, "act_42");
+    assert.ok(events[2].output.includes("ChatService"));
+  }
+  if (events[4].type === "done") {
+    assert.equal(events[4].totalSteps, 2);
+  }
+});

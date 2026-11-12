@@ -104,6 +104,7 @@ export const useChat = () => {
       timestamp: new Date().toISOString(),
       mode: activeMode,
       thoughts: [],
+      actions: [],
     };
 
     setMessages((prev) => [...prev, newAssistantMessage]);
@@ -136,6 +137,53 @@ export const useChat = () => {
                   ? { ...msg, thoughts: [...(msg.thoughts || []), event.thought] }
                   : msg
               )
+            );
+          } else if (event.type === 'action_call') {
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id !== assistantMessageId) return msg;
+                const currentActions = msg.actions || [];
+                const exists = currentActions.some((a) => a.actionId === event.actionId);
+                if (exists) return msg;
+                return {
+                  ...msg,
+                  actions: [
+                    ...currentActions,
+                    {
+                      actionId: event.actionId,
+                      tool: event.tool,
+                      args: event.args,
+                      tier: event.tier,
+                    },
+                  ],
+                };
+              })
+            );
+          } else if (event.type === 'action_result') {
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id !== assistantMessageId) return msg;
+                const currentActions = msg.actions || [];
+                const idx = currentActions.findIndex((a) => a.actionId === event.actionId);
+                if (idx >= 0) {
+                  const updated = [...currentActions];
+                  updated[idx] = { ...updated[idx], output: event.output };
+                  return { ...msg, actions: updated };
+                }
+                return {
+                  ...msg,
+                  actions: [
+                    ...currentActions,
+                    {
+                      actionId: event.actionId,
+                      tool: event.tool,
+                      args: {},
+                      tier: 1,
+                      output: event.output,
+                    },
+                  ],
+                };
+              })
             );
           }
         }

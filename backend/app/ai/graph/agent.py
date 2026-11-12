@@ -1,12 +1,14 @@
 from typing import List, Optional
 from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm, CRAFT_MODES, LocalCraftLLM
+from app.ai.tools.workspace import TIER_1_TOOLS
 
 # Define tools here
-tools = []
+tools = list(TIER_1_TOOLS)
 
 # Maximum messages kept in the sliding context window (plus system prompt)
 MAX_CONTEXT_MESSAGES = 10
@@ -69,7 +71,7 @@ def chatbot_node(state: AgentState, config: RunnableConfig):
     messages = [SystemMessage(content=full_system_prompt)] + trimmed_messages
 
     llm = get_llm(tier=user_tier, model_id=model_id, mode=mode)
-    llm_with_tools = llm.bind_tools(tools) if tools else llm
+    llm_with_tools = llm.bind_tools(tools) if (mode == "agent" and tools) else llm
 
     try:
         response = llm_with_tools.invoke(messages)
@@ -77,7 +79,8 @@ def chatbot_node(state: AgentState, config: RunnableConfig):
         err_str = str(exc).lower()
         if "model" in err_str or "not found" in err_str or "decommissioned" in err_str or "connect" in err_str:
             fallback = LocalCraftLLM(model_name=model_id or "gptcraft", mode=mode)
-            response = fallback.invoke(messages)
+            fallback_with_tools = fallback.bind_tools(tools) if (mode == "agent" and tools) else fallback
+            response = fallback_with_tools.invoke(messages)
         else:
             raise exc
 
@@ -89,12 +92,16 @@ graph_builder = StateGraph(AgentState)
 
 # Add nodes
 graph_builder.add_node("chatbot", chatbot_node)
+graph_builder.add_node("tools", ToolNode(tools))
 
 # Set entry point
 graph_builder.set_entry_point("chatbot")
 
-# Add edges
-graph_builder.add_edge("chatbot", END)
+# Add conditional edges
+graph_builder.add_conditional_edges("chatbot", tools_condition)
+
+# Add cyclical edge back to chatbot
+graph_builder.add_edge("tools", "chatbot")
 
 # Compile the agent
 agent = graph_builder.compile()

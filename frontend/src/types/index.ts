@@ -41,6 +41,16 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface AgentActionTelemetry {
+  actionId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  tier: number;
+  output?: string;
+}
+
+export type AgentActionItem = AgentActionTelemetry;
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -48,6 +58,7 @@ export interface Message {
   timestamp: string;
   mode?: CraftMode;
   thoughts?: string[];
+  actions?: AgentActionTelemetry[];
 }
 
 export interface Quota {

@@ -15,7 +15,16 @@ export type SseEventEnvelope =
       rationale: string;
       diff?: string;
     }
-  | { type: 'action_result'; actionId: string; tool: string; output: string }
+  | {
+      type: 'action_result';
+      actionId: string;
+      tool: string;
+      output: string;
+      durationMs?: number;
+      latencyMs?: number;
+      exitCode?: number;
+      status?: string;
+    }
   | { type: 'chunk'; content: string }
   | {
       type: 'done';
@@ -64,6 +73,11 @@ export interface AgentActionTelemetry {
   args: Record<string, unknown>;
   tier: number;
   output?: string;
+  status?: 'running' | 'completed' | 'failed' | 'aborted';
+  durationMs?: number;
+  startTime?: number;
+  exitCode?: number;
+  error?: string;
 }
 
 export type AgentActionItem = AgentActionTelemetry;

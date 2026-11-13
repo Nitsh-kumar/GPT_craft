@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { Message, CraftMode } from '../../types';
 import { cn } from '../../utils/cn';
-import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb, Bot, Wrench } from 'lucide-react';
+import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb, Bot } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ApprovalCard } from './ApprovalCard';
+import { TelemetryDrawer } from './TelemetryDrawer';
 
 interface MessageBubbleProps {
   message: Message;
   modelName?: string;
   modeName?: CraftMode;
+  isStreaming?: boolean;
   onApprovalDecision?: (
     actionId: string,
     decision: 'approve' | 'modify' | 'reject',
@@ -43,6 +45,7 @@ export const MessageBubble = ({
   message,
   modelName = 'GPTCraft Engine',
   modeName = 'standard',
+  isStreaming = false,
   onApprovalDecision,
 }: MessageBubbleProps) => {
   const isUser = message.role === 'user';
@@ -128,61 +131,15 @@ export const MessageBubble = ({
         </div>
       </div>
 
-      {/* Agent Thought Envelopes */}
-      {hasThoughts && (
-        <div
-          data-testid="agent-thought-trace"
-          className="mb-3 space-y-1 rounded-lg border border-line bg-sunken px-3 py-2 font-mono text-xs text-ink-2"
-        >
-          {message.thoughts!.map((thought, idx) => (
-            <div key={idx} className="flex items-start gap-2">
-              <Bot size={13} className="mt-0.5 shrink-0 text-accent" />
-              <span>{thought}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Agent Action Telemetry */}
-      {hasActions && (
-        <div
-          data-testid="agent-action-telemetry"
-          className="mb-3 space-y-2 rounded-lg border border-line bg-sunken p-3 font-mono text-xs text-ink-2"
-        >
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-accent uppercase tracking-wider">
-            <Wrench size={12} className="text-accent" />
-            <span>Agent Workspace Actions</span>
-          </div>
-          {message.actions!.map((action, idx) => (
-            <div
-              key={action.actionId || idx}
-              data-testid={`action-telemetry-item-${action.tool}`}
-              className="rounded-md border border-line bg-raised/70 p-2 text-xs"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 font-medium text-ink">
-                  <span className="text-accent font-mono text-[11px]">{action.tool}</span>
-                  <span className="rounded bg-accent/15 text-accent border border-accent/25 px-1 py-0.5 font-mono text-[9px] font-semibold">
-                    Tier {action.tier}
-                  </span>
-                </div>
-                <span className="text-[10px] text-ink-3">
-                  {action.output !== undefined ? 'Completed' : 'Running...'}
-                </span>
-              </div>
-              {action.args && Object.keys(action.args).length > 0 && (
-                <div className="mt-1 text-[11px] text-ink-3">
-                  <span className="text-ink-2">args:</span> {JSON.stringify(action.args)}
-                </div>
-              )}
-              {action.output !== undefined && (
-                <div className="mt-1.5 rounded border border-line/60 bg-sunken/80 p-1.5 text-[11px] text-ink-2 overflow-x-auto max-h-36">
-                  <pre className="whitespace-pre-wrap">{action.output}</pre>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+      {/* Agent Telemetry Drawer (Thoughts & Workspace Tool Executions) */}
+      {(hasThoughts || hasActions) && (
+        <TelemetryDrawer
+          thoughts={message.thoughts}
+          actions={message.actions}
+          isStreaming={isStreaming}
+          defaultExpanded={isStreaming}
+          className="mb-3"
+        />
       )}
 
       {/* Human-In-The-Loop Approval Card */}

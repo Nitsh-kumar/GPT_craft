@@ -14,6 +14,9 @@ interface RawSsePayload {
   rationale?: string;
   diff?: string;
   output?: string;
+  durationMs?: number;
+  latencyMs?: number;
+  exitCode?: number;
   status?: string;
   totalSteps?: number;
   conversationId?: string | number;
@@ -56,13 +59,23 @@ function normalizeEnvelope(eventName: string | null, data: RawSsePayload): SseEv
         rationale: String(data.rationale ?? ''),
         diff: typeof data.diff === 'string' ? data.diff : undefined,
       };
-    case 'action_result':
+    case 'action_result': {
+      const durationMs =
+        typeof data.durationMs === 'number'
+          ? data.durationMs
+          : typeof data.latencyMs === 'number'
+            ? data.latencyMs
+            : undefined;
       return {
         type: 'action_result',
         actionId: String(data.actionId ?? ''),
         tool: String(data.tool ?? ''),
         output: String(data.output ?? ''),
+        ...(durationMs !== undefined ? { durationMs } : {}),
+        ...(typeof data.exitCode === 'number' ? { exitCode: data.exitCode } : {}),
+        ...(typeof data.status === 'string' ? { status: data.status } : {}),
       };
+    }
     case 'done': {
       const rawConvId = data.conversationId ?? data.conversation_id;
       return {

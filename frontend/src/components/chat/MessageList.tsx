@@ -204,12 +204,13 @@ export const MessageList = ({
           </div>
         ) : (
           <div className="py-6 sm:py-8 space-y-6">
-            {messages.map((message) => (
+            {messages.map((message, index) => (
               <MessageBubble
                 key={message.id}
                 message={message}
                 modelName={message.modelUsed || 'Model not recorded'}
                 modeName={message.modeUsed || selectedMode}
+                isStreaming={isGenerating && index === messages.length - 1}
                 onApprovalDecision={onApprovalDecision}
               />
             ))}

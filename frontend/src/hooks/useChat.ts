@@ -163,6 +163,7 @@ export const useChat = () => {
               )
             );
           } else if (event.type === 'action_call') {
+            const now = Date.now();
             setMessages((prev) =>
               prev.map((msg) => {
                 if (msg.id !== assistantMessageId) return msg;
@@ -178,12 +179,15 @@ export const useChat = () => {
                       tool: event.tool,
                       args: event.args,
                       tier: event.tier,
+                      startTime: now,
+                      status: 'running',
                     },
                   ],
                 };
               })
             );
           } else if (event.type === 'action_result') {
+            const now = Date.now();
             setMessages((prev) =>
               prev.map((msg) => {
                 if (msg.id !== assistantMessageId) return msg;
@@ -191,7 +195,21 @@ export const useChat = () => {
                 const idx = currentActions.findIndex((a) => a.actionId === event.actionId);
                 if (idx >= 0) {
                   const updated = [...currentActions];
-                  updated[idx] = { ...updated[idx], output: event.output };
+                  const existing = updated[idx];
+                  const calculatedDuration =
+                    existing.startTime !== undefined ? Math.max(1, now - existing.startTime) : undefined;
+                  const finalDuration = event.durationMs ?? calculatedDuration;
+                  const isError =
+                    (event.exitCode !== undefined && event.exitCode !== 0) ||
+                    event.output.startsWith('Error:') ||
+                    event.output.includes('Traceback (most recent call last)');
+                  updated[idx] = {
+                    ...existing,
+                    output: event.output,
+                    durationMs: finalDuration,
+                    exitCode: event.exitCode,
+                    status: (event.status as any) || (isError ? 'failed' : 'completed'),
+                  };
                   return { ...msg, actions: updated };
                 }
                 return {
@@ -204,6 +222,9 @@ export const useChat = () => {
                       args: {},
                       tier: 1,
                       output: event.output,
+                      durationMs: event.durationMs,
+                      exitCode: event.exitCode,
+                      status: (event.status as any) || 'completed',
                     },
                   ],
                 };
@@ -265,6 +286,21 @@ export const useChat = () => {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsGenerating(false);
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.role !== 'assistant' || !msg.actions) return msg;
+          const updatedActions = msg.actions.map((action) =>
+            action.output === undefined
+              ? {
+                  ...action,
+                  output: '[Execution aborted by user]',
+                  status: 'aborted' as const,
+                }
+              : action
+          );
+          return { ...msg, actions: updatedActions };
+        })
+      );
     }
   }, []);
 
@@ -307,6 +343,7 @@ export const useChat = () => {
           },
           (event) => {
             if (event.type === 'action_result') {
+              const now = Date.now();
               setMessages((prev) =>
                 prev.map((msg) => {
                   if (msg.id !== targetMessageId) return msg;
@@ -314,7 +351,21 @@ export const useChat = () => {
                   const idx = currentActions.findIndex((a) => a.actionId === event.actionId);
                   if (idx >= 0) {
                     const updated = [...currentActions];
-                    updated[idx] = { ...updated[idx], output: event.output };
+                    const existing = updated[idx];
+                    const calculatedDuration =
+                      existing.startTime !== undefined ? Math.max(1, now - existing.startTime) : undefined;
+                    const finalDuration = event.durationMs ?? calculatedDuration;
+                    const isError =
+                      (event.exitCode !== undefined && event.exitCode !== 0) ||
+                      event.output.startsWith('Error:') ||
+                      event.output.includes('Traceback (most recent call last)');
+                    updated[idx] = {
+                      ...existing,
+                      output: event.output,
+                      durationMs: finalDuration,
+                      exitCode: event.exitCode,
+                      status: (event.status as any) || (isError ? 'failed' : 'completed'),
+                    };
                     return { ...msg, actions: updated };
                   }
                   return {
@@ -327,6 +378,9 @@ export const useChat = () => {
                         args: {},
                         tier: 2,
                         output: event.output,
+                        durationMs: event.durationMs,
+                        exitCode: event.exitCode,
+                        status: (event.status as any) || 'completed',
                       },
                     ],
                   };
@@ -389,6 +443,7 @@ export const useChat = () => {
   return {
     messages,
     isGenerating,
+    isStreaming: isGenerating,
     error,
     models,
     selectedModel,

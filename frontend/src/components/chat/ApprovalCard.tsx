@@ -1,7 +1,19 @@
 import React, { useState } from 'react';
-import { ShieldAlert, Check, X, Edit3, FileCode, Terminal, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  ShieldAlert,
+  Check,
+  X,
+  Edit3,
+  FileCode,
+  Terminal,
+  MessageSquare,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+} from 'lucide-react';
 import { ApprovalRequiredEnvelope } from '../../types';
 import { cn } from '../../utils/cn';
+import { parseUnifiedDiff } from '../../utils/telemetry';
 
 interface ApprovalCardProps {
   approval: ApprovalRequiredEnvelope;
@@ -31,8 +43,15 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
   const [modifiedCommand, setModifiedCommand] = useState(initialCommand);
   const [feedback, setFeedback] = useState('');
   const [showFullDiff, setShowFullDiff] = useState(true);
+  const [commandCopied, setCommandCopied] = useState(false);
 
-  const diffLines = (approval.diff || '(No diff available)').split('\n');
+  const parsedDiff = parseUnifiedDiff(approval.diff);
+
+  const handleCopyCommand = (cmd: string) => {
+    navigator.clipboard.writeText(cmd);
+    setCommandCopied(true);
+    setTimeout(() => setCommandCopied(false), 2000);
+  };
 
   const handleApprove = () => {
     onDecision(approval.actionId, 'approve');
@@ -231,34 +250,85 @@ export const ApprovalCard: React.FC<ApprovalCardProps> = ({
               isCommand ? (
                 <div
                   data-testid="command-viewer"
-                  className="rounded-lg border border-line bg-sunken p-3 font-mono text-xs text-ink"
+                  className="overflow-hidden rounded-lg border border-line bg-sunken font-mono text-xs shadow-sm"
                 >
-                  <div className="flex items-center gap-2 text-ink-3 pb-1.5 border-b border-line/40 text-[11px]">
-                    <Terminal size={12} />
-                    <span>Working Directory: Workspace Project Root</span>
+                  <div className="flex items-center justify-between border-b border-line/60 bg-raised/70 px-3 py-1.5 text-[11px] text-ink-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 select-none">
+                        <span className="h-2 w-2 rounded-full bg-danger/50" />
+                        <span className="h-2 w-2 rounded-full bg-warn/50" />
+                        <span className="h-2 w-2 rounded-full bg-ok/50" />
+                      </div>
+                      <span className="text-line-strong select-none">|</span>
+                      <Terminal size={12} className="text-accent shrink-0" />
+                      <span className="font-semibold text-ink-2">Terminal Shell</span>
+                      <span className="text-ink-3/70 select-none">· workspace root</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCommand(initialCommand)}
+                      data-testid="copy-command-btn"
+                      className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-mono text-ink-3 hover:text-ink hover:bg-raised transition-colors border border-transparent hover:border-line"
+                    >
+                      {commandCopied ? (
+                        <>
+                          <Check size={11} className="text-ok" />
+                          <span className="text-ok font-semibold">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={11} />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <pre className="mt-2 text-ok whitespace-pre-wrap break-all">$ {initialCommand}</pre>
+                  <div className="p-3 bg-sunken/90 select-text">
+                    <div className="flex items-start gap-2">
+                      <span className="select-none font-bold text-accent">$</span>
+                      <pre className="text-ok font-medium whitespace-pre-wrap break-all flex-1">{initialCommand}</pre>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div
                   data-testid="diff-viewer"
-                  className="max-h-60 overflow-x-auto rounded-lg border border-line bg-sunken p-2.5 font-mono text-[11px] leading-relaxed"
+                  className="max-h-64 overflow-x-auto rounded-lg border border-line bg-sunken font-mono text-[11px] leading-relaxed select-text"
                 >
-                  {diffLines.map((line, idx) => {
-                    let lineStyle = 'text-ink-2';
-                    if (line.startsWith('+') && !line.startsWith('+++')) {
-                      lineStyle = 'bg-ok/15 text-ok font-semibold';
-                    } else if (line.startsWith('-') && !line.startsWith('---')) {
-                      lineStyle = 'bg-danger/15 text-danger font-semibold';
-                    } else if (line.startsWith('@@')) {
-                      lineStyle = 'text-accent font-semibold';
-                    }
-                    return (
-                      <div key={idx} className={cn('px-1.5 py-0.5 rounded-sm whitespace-pre', lineStyle)}>
-                        {line}
-                      </div>
-                    );
-                  })}
+                  <div className="min-w-full divide-y divide-line/20">
+                    {parsedDiff.map((line, idx) => {
+                      let rowStyle = 'text-ink-2';
+                      if (line.type === 'add') {
+                        rowStyle = 'bg-ok/15 text-ok';
+                      } else if (line.type === 'delete') {
+                        rowStyle = 'bg-danger/15 text-danger';
+                      } else if (line.type === 'header') {
+                        rowStyle = 'bg-accent/10 text-accent font-semibold';
+                      } else if (line.type === 'meta') {
+                        rowStyle = 'bg-raised/40 text-ink-3 italic';
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          className={cn('flex items-stretch hover:bg-surface/20 transition-colors', rowStyle)}
+                        >
+                          {/* Old line number */}
+                          <span className="w-9 shrink-0 select-none px-2 py-0.5 text-right font-mono text-[10px] text-ink-3/60 border-r border-line/40">
+                            {line.oldLineNumber ?? ''}
+                          </span>
+                          {/* New line number */}
+                          <span className="w-9 shrink-0 select-none px-2 py-0.5 text-right font-mono text-[10px] text-ink-3/60 border-r border-line/40">
+                            {line.newLineNumber ?? ''}
+                          </span>
+                          {/* Line content */}
+                          <span className="flex-1 px-2 py-0.5 whitespace-pre overflow-x-visible">
+                            {line.content}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )
             )}

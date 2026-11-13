@@ -10,11 +10,22 @@ from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm, CRAFT_MODES
+from app.ai.mcp import mcp_manager
 from app.ai.tools.workspace import TIER_1_TOOLS, TIER_2_TOOLS
 from app.core.config import get_settings
 
-# Define tools here (Tier 1 read-only tools + Tier 2 HITL file & terminal mutation tools)
+# Define static built-in tools (Tier 1 read-only + Tier 2 HITL file & terminal mutation tools)
 tools = list(TIER_1_TOOLS) + list(TIER_2_TOOLS)
+
+
+def get_agent_tools():
+    """Return built-in workspace tools combined with any healthy MCP tools."""
+    try:
+        mcp_tools = mcp_manager.get_tools()
+    except Exception:
+        mcp_tools = []
+    seen = {t.name for t in tools}
+    return tools + [t for t in mcp_tools if t.name not in seen]
 
 # Maximum messages kept in the sliding context window (plus system prompt)
 MAX_CONTEXT_MESSAGES = 10
@@ -87,7 +98,8 @@ async def chatbot_node(state: AgentState, config: RunnableConfig):
             mode=mode,
             http_async_client=transport,
         )
-        llm_with_tools = llm.bind_tools(tools) if (mode == "agent" and tools) else llm
+        active_tools = get_agent_tools() if mode == "agent" else []
+        llm_with_tools = llm.bind_tools(active_tools) if active_tools else llm
 
         if cancel_event is None:
             response = await llm_with_tools.ainvoke(messages, config=config)
@@ -114,9 +126,14 @@ async def chatbot_node(state: AgentState, config: RunnableConfig):
     return {"messages": [response]}
 
 
+async def tools_node(state: AgentState, config: RunnableConfig):
+    """Execute built-in workspace tools alongside active MCP server tools."""
+    return await ToolNode(get_agent_tools()).ainvoke(state, config=config)
+
+
 graph_builder = StateGraph(AgentState)
 graph_builder.add_node("chatbot", chatbot_node)
-graph_builder.add_node("tools", ToolNode(tools))
+graph_builder.add_node("tools", tools_node)
 graph_builder.set_entry_point("chatbot")
 graph_builder.add_conditional_edges("chatbot", tools_condition)
 graph_builder.add_edge("tools", "chatbot")

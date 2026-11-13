@@ -22,8 +22,8 @@ These standards define the quality, architectural, and design judgement calls en
 ## 2. Cross-Stack Contract Conventions
 
 ### 2.1 Casing and Data Serialization
-- **Public API Responses**: All external JSON payloads consumed by the frontend must use camelCase for properties (e.g., `accessToken`, `tokenType`, `totalTokens`, `createdAt`).
-- **Internal Python**: Models, schemas, database columns, and service methods use `snake_case`. Pydantic schemas must use aliases or camelCase population configs for frontend-facing models.
+- **Public API Responses**: Auth and quota responses use camelCase. Existing chat, history, conversation, and SSE metadata fields remain snake_case for compatibility. Follow the contract table in `docs/OPERATIONS.md`; new changes must update both clients and HTTP tests.
+- **Internal Python**: Models, schemas, database columns, and service methods use `snake_case`. Pydantic aliases must match the documented external contract.
 - **TypeScript Sync**: When changing a Pydantic schema in `backend/app/schemas/`, simultaneously update the corresponding TypeScript interface in `frontend/src/types/index.ts`.
 
 ### 2.2 Tier & Quota Hierarchy
@@ -48,12 +48,12 @@ These standards define the quality, architectural, and design judgement calls en
 ## 4. UI Design System & Theme Compatibility
 
 ### 4.1 Semantic CSS Tokens
-- The GPTCraft visual system uses the "Paper & Ink" design tokens.
+- The GPTCraft visual system uses the "Modern Studio / Precision Atelier" design tokens.
 - **Never use hardcoded hex or raw Tailwind colors** (such as `#ffffff`, `bg-gray-100`, `text-black`) for main structural elements.
 - Use semantic CSS variables and tokens:
   - Backgrounds: `var(--canvas)`, `var(--surface)`, `var(--raised)`
   - Text & Lines: `var(--ink)`, `var(--line)`
-  - Accent/Brand: `var(--ember)`
+  - Accent/Brand: `var(--accent)` (legacy ember tokens remain supported)
 - Ensure every new UI element renders with high contrast and readable typography in both light and dark modes.
 
 ---
@@ -69,7 +69,7 @@ These standards define the quality, architectural, and design judgement calls en
 ## 6. Testing & Deterministic Verification
 
 ### 6.1 Zero-Network Offline Testing
-- Backend unit and integration tests (`backend/tests/`) must **never** call live external LLM APIs (Groq, Anthropic, OpenAI). Always mock AI graph execution (`agent.invoke`) in automated test runs.
+- Backend unit and integration tests (`backend/tests/`) must **never** call live external LLM APIs (Groq, Anthropic, OpenAI). Inject an offline fake at the provider factory; keep graph and HTTP behavior under test.
 - Test suites must use an isolated temporary database fixture and leave no persistent `.db` artifacts behind.
 
 ### 6.2 Full-Stack Verification Rule

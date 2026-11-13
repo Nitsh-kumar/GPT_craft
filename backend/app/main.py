@@ -1,9 +1,6 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import get_settings
 from app.db.base import Base
@@ -16,19 +13,10 @@ from app.db.models import User, Plans
 # Initialize settings
 settings = get_settings()
 
-# Initialize Rate Limiter
-limiter = Limiter(key_func=get_remote_address)
-
-# Create database tables defensively
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"⚠️ Failed to create database tables on module load: {e}")
-
 # Seed default plans if they don't exist
-def seed_default_plan():
+def seed_default_plan(bind=engine):
     """Ensure Free, Super, and Hyper plans exist in the database."""
-    db = SessionLocal()
+    db = SessionLocal(bind=bind)
     try:
         default_plans = [
             {"id": 1, "name": "free", "price": 0, "description": "Free plan - 50 requests/day, 5,000 tokens"},
@@ -47,7 +35,7 @@ def seed_default_plan():
         db.close()
 
 
-seed_default_plan()
+# Run `python -m app.db.migrate` explicitly before serving a new deployment.
 
 # Create FastAPI app
 app = FastAPI(
@@ -71,10 +59,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Set up Rate Limiter
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add Session Middleware (Required for OAuth state/nonce)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)

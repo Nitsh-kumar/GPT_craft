@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { PlanType } from '../types';
-import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, Sparkles, Zap, Crown, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowLeft, Check, Sparkles, Zap, Crown } from 'lucide-react';
 import { ThemeSwitcher } from '../components/layout/ThemeSwitcher';
 
 interface PlanSpec {
@@ -24,7 +24,7 @@ const PLANS: PlanSpec[] = [
     period: '/mo',
     description: 'Essential AI reasoning for everyday exploration.',
     features: [
-      'Llama 3 8B & Gemma 2 9B',
+      'GPT-OSS 20B',
       '50 requests / day',
       '5,000 daily tokens',
       'All 4 Craft Modes',
@@ -39,7 +39,7 @@ const PLANS: PlanSpec[] = [
     description: 'High-throughput Mixture-of-Experts for builders.',
     features: [
       'Everything in Free',
-      'Unlocks Mixtral 8x7B',
+      'Higher daily allowance',
       '500 requests / day',
       '50,000 daily tokens',
     ],
@@ -51,10 +51,10 @@ const PLANS: PlanSpec[] = [
     title: 'Hyper',
     price: '$39',
     period: '/mo',
-    description: 'Maximum frontier intelligence and 70B scale.',
+    description: 'Larger models and a higher daily allowance.',
     features: [
       'Everything in Super',
-      'Unlocks Llama 3.3 70B',
+      'Unlocks GPT-OSS 120B',
       '5,000 requests / day',
       '500,000 daily tokens',
     ],
@@ -63,26 +63,10 @@ const PLANS: PlanSpec[] = [
 ];
 
 export const SubscriptionPage = () => {
-  const { user, upgradePlan } = useAuth();
-  const navigate = useNavigate();
-  const [updatingPlan, setUpdatingPlan] = useState<PlanType | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const { user } = useAuth();
 
   const currentPlan: PlanType = (user?.plan as PlanType) || 'free';
 
-  const handleSelectPlan = async (planId: PlanType) => {
-    if (planId === currentPlan) return;
-    setUpdatingPlan(planId);
-    setStatusMsg(null);
-    try {
-      await upgradePlan(planId);
-      setStatusMsg(`Successfully switched to the ${planId.toUpperCase()} tier!`);
-    } catch (err: any) {
-      setStatusMsg(err.message || 'Failed to update subscription plan.');
-    } finally {
-      setUpdatingPlan(null);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-canvas text-ink p-6 md:p-12">
@@ -112,29 +96,15 @@ export const SubscriptionPage = () => {
             Manage Your GPTCraft Tier
           </h1>
           <p className="text-ink-2 max-w-xl mx-auto text-sm">
-            Unlock larger reasoning models (Mixtral 8x7B and Llama 3.3 70B) and expand your daily token and request quotas immediately.
+            Paid plan changes are not available yet. Your current plan and usage allowance remain in place.
           </p>
-          {statusMsg && (
-            <div
-              data-testid="subscription-status-banner"
-              className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-ember-soft border border-ember/40 text-ember text-sm font-medium"
-            >
-              <Check size={16} />
-              <span>{statusMsg}</span>
-              <button
-                onClick={() => navigate('/chat')}
-                className="ml-3 underline text-xs hover:text-ink"
-              >
-                Return to Chat
-              </button>
-            </div>
-          )}
+
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
           {PLANS.map((plan) => {
             const isCurrent = currentPlan === plan.id;
-            const isBusy = updatingPlan === plan.id;
+
 
             return (
               <div
@@ -176,20 +146,17 @@ export const SubscriptionPage = () => {
                 <button
                   type="button"
                   data-testid={`select-plan-${plan.id}`}
-                  disabled={isCurrent || updatingPlan !== null}
-                  onClick={() => handleSelectPlan(plan.id)}
+                  disabled={true}
                   className={`w-full py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
                     isCurrent
                       ? 'bg-sunken text-ink-3 cursor-default'
                       : 'bg-ember text-on-ember hover:bg-ember-hover cursor-pointer'
                   }`}
                 >
-                  {isBusy ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : isCurrent ? (
+                  {isCurrent ? (
                     'Active Plan'
                   ) : (
-                    `Switch to ${plan.title}`
+                    'Coming soon'
                   )}
                 </button>
               </div>

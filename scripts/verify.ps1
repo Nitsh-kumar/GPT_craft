@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -35,6 +35,8 @@ try {
 
     # 3. Frontend Production Build
     Write-Host "`n[3/3] Running Frontend Production Build (npm run build)..." -ForegroundColor Yellow
+    npm test
+    if ($LASTEXITCODE -ne 0) { throw "Frontend stream tests failed" }
     npm run build
     if ($LASTEXITCODE -ne 0) {
         throw "Frontend Vite build failed with exit code $LASTEXITCODE"

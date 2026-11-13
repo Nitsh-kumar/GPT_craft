@@ -1,50 +1,45 @@
+"""Async graph: native model chunks propagate through stream_mode='messages'."""
+import asyncio
+import httpx
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm, CRAFT_MODES, LocalCraftLLM
-
-# Define tools here
-tools = []
+from app.ai.llm import get_llm, CRAFT_MODES
+from app.core.config import get_settings
 
 
-def chatbot_node(state: AgentState, config: RunnableConfig):
-    """
-    The main node representing the chatbot's reasoning with Craft Mode system prompts.
-    """
-    configurable = config.get("configurable", {})
-    user_tier = configurable.get("user_tier", "free")
-    model_id = configurable.get("model_id")
-    mode = (configurable.get("mode") or "standard").lower()
-
-    system_prompt = CRAFT_MODES.get(mode, CRAFT_MODES["standard"])
-    llm = get_llm(tier=user_tier, model_id=model_id, mode=mode)
-    llm_with_tools = llm.bind_tools(tools) if tools else llm
-
-    messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
-    try:
-        response = llm_with_tools.invoke(messages)
-    except Exception as exc:
-        err_str = str(exc).lower()
-        if "model" in err_str or "not found" in err_str or "decommissioned" in err_str or "connect" in err_str:
-            fallback = LocalCraftLLM(model_name=model_id or "gptcraft", mode=mode)
-            response = fallback.invoke(messages)
-        else:
-            raise exc
+async def chatbot_node(state: AgentState, config: RunnableConfig):
+    options = config.get("configurable", {})
+    mode = options.get("mode", "standard")
+    # Request-scoped transport closes sockets even when the graph is cancelled.
+    async with httpx.AsyncClient(timeout=get_settings().generation_timeout_seconds) as transport:
+        llm = get_llm(tier=options.get("user_tier", "free"),
+                      model_id=options.get("model_id"), mode=mode,
+                      http_async_client=transport)
+        generation = asyncio.create_task(llm.ainvoke(
+            [SystemMessage(content=CRAFT_MODES[mode]), *state["messages"]], config=config
+        ))
+        cancelled = asyncio.create_task(options["cancel_event"].wait())
+        try:
+            done, _ = await asyncio.wait(
+                [generation, cancelled], timeout=get_settings().generation_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancelled in done:
+                raise asyncio.CancelledError
+            if generation not in done:
+                raise TimeoutError("Generation deadline exceeded")
+            response = generation.result()
+        finally:
+            generation.cancel()
+            cancelled.cancel()
+            await asyncio.gather(generation, cancelled, return_exceptions=True)
     return {"messages": [response]}
 
 
-# Define the graph
 graph_builder = StateGraph(AgentState)
-
-# Add nodes
 graph_builder.add_node("chatbot", chatbot_node)
-
-# Set entry point
 graph_builder.set_entry_point("chatbot")
-
-# Add edges
 graph_builder.add_edge("chatbot", END)
-
-# Compile the agent
 agent = graph_builder.compile()

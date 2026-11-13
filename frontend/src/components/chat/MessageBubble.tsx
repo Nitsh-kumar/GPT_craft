@@ -96,6 +96,9 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
         </div>
       </div>
 
+      {message.status === 'interrupted' && (
+        <p className="mb-3 text-xs text-warn" role="status">Generation interrupted — this response is incomplete.</p>
+      )}
       {/* Structured Content Stream */}
       <div className="min-w-0 flex-1">
         <div className="prose-craft">

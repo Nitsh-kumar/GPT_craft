@@ -54,3 +54,22 @@ class ModelInfoResponse(BaseModel):
     name: str
     description: str
     requiredPlan: str
+
+
+class ApprovalDecisionRequest(BaseModel):
+    actionId: str
+    decision: str
+    modifiedParams: Optional[dict] = None
+    feedback: Optional[str] = None
+
+
+class ApprovalPendingResponse(BaseModel):
+    actionId: str
+    conversationId: int
+    tool: str
+    toolName: Optional[str] = None
+    tier: int
+    parameters: dict
+    rationale: str
+    diff: Optional[str] = None
+    status: str

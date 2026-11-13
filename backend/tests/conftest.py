@@ -59,3 +59,20 @@ def provider(monkeypatch):
     fake = ProviderFake()
     monkeypatch.setattr(importlib.import_module("app.ai.graph.agent"), "get_llm", lambda **kwargs: fake)
     return fake
+
+
+@pytest.fixture
+def agent_provider(monkeypatch):
+    import importlib
+    from tests.fakes import AgentToolFake
+    state = {"failure": None}
+
+    def factory(**kwargs):
+        return AgentToolFake(
+            mode=(kwargs.get("mode") or "standard").lower(),
+            model_name=kwargs.get("model_id") or "openai/gpt-oss-20b",
+            failure=state["failure"],
+        )
+
+    monkeypatch.setattr(importlib.import_module("app.ai.graph.agent"), "get_llm", factory)
+    return state

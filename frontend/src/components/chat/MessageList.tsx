@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Message, CraftMode } from '../../types';
 import { MessageBubble } from './MessageBubble';
-import { Compass, Code2, Lightbulb, Sparkles, Zap, ArrowUpRight, Cpu } from 'lucide-react';
+import { Compass, Code2, Lightbulb, Sparkles, Zap, ArrowUpRight, Cpu, Bot } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
 interface MessageListProps {
@@ -11,6 +11,12 @@ interface MessageListProps {
   selectedMode?: CraftMode;
   selectedModelName?: string;
   onQuickPrompt?: (prompt: string, mode?: CraftMode) => void;
+  onApprovalDecision?: (
+    actionId: string,
+    decision: 'approve' | 'modify' | 'reject',
+    modifiedParams?: Record<string, unknown>,
+    feedback?: string
+  ) => void;
 }
 
 interface WorkbenchCard {
@@ -22,6 +28,7 @@ interface WorkbenchCard {
   icon: React.ReactNode;
   accentColor: string;
   borderColor: string;
+  featured?: boolean;
 }
 
 const WORKBENCH_CARDS: WorkbenchCard[] = [
@@ -65,6 +72,17 @@ const WORKBENCH_CARDS: WorkbenchCard[] = [
     accentColor: 'text-accent bg-accent-soft',
     borderColor: 'hover:border-accent/40',
   },
+  {
+    mode: 'agent',
+    title: 'Agent Studio',
+    category: 'Autonomous Workspace Agent',
+    prompt: 'Inspect the repository architecture and outline the safest next execution steps.',
+    tag: 'AGENT STUDIO',
+    icon: <Bot size={18} />,
+    accentColor: 'text-accent bg-accent-soft',
+    borderColor: 'hover:border-accent/50',
+    featured: true,
+  },
 ];
 
 export const MessageList = ({
@@ -74,6 +92,7 @@ export const MessageList = ({
   selectedMode = 'standard',
   selectedModelName = 'No model selected',
   onQuickPrompt,
+  onApprovalDecision,
 }: MessageListProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -128,6 +147,7 @@ export const MessageList = ({
                       onClick={() => onQuickPrompt(card.prompt, card.mode)}
                       className={cn(
                         'group relative flex flex-col text-left p-4 rounded-xl border bg-raised transition-all duration-200 shadow-lift',
+                        card.featured && 'sm:col-span-2',
                         isCurrentMode ? 'border-accent ring-1 ring-accent/20' : 'border-line',
                         card.borderColor,
                         'hover:shadow-float active:translate-y-px'
@@ -184,12 +204,14 @@ export const MessageList = ({
           </div>
         ) : (
           <div className="py-6 sm:py-8 space-y-6">
-            {messages.map((message) => (
+            {messages.map((message, index) => (
               <MessageBubble
                 key={message.id}
                 message={message}
                 modelName={message.modelUsed || 'Model not recorded'}
-                modeName={message.modeUsed}
+                modeName={message.modeUsed || selectedMode}
+                isStreaming={isGenerating && index === messages.length - 1}
+                onApprovalDecision={onApprovalDecision}
               />
             ))}
             {isGenerating && (lastIsEmptyAssistant || messages[messages.length - 1]?.role === 'user') && (
@@ -199,7 +221,7 @@ export const MessageList = ({
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-mono font-medium text-ink">GPTCraft Engine</span>
-                  <span className="text-xs text-ink-3">is formulating reasoning response…</span>
+                  <span className="text-xs text-ink-3">{selectedMode === 'agent' ? 'is planning Agent Studio execution…' : 'is formulating reasoning response…'}</span>
                 </div>
               </div>
             )}

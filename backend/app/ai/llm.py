@@ -1,8 +1,9 @@
 """Canonical model identities and provider construction. No implicit demo mode."""
-from typing import Optional
+from typing import Dict, Optional
 from fastapi import HTTPException
 from langchain_groq import ChatGroq
 from app.core.config import get_settings
+from app.ai.prompts import MASTER_PROMPTS, MODE_TEMPERATURES
 
 PLAN_HIERARCHY = {"free": 0, "super": 1, "pro": 1, "hyper": 2}
 PLAN_QUOTAS = {
@@ -27,25 +28,7 @@ LEGACY_MODEL_IDS = {
     "llama3-70b-8192": "openai/gpt-oss-120b",
 }
 
-CRAFT_MODES: dict[str, str] = {
-    "standard": (
-        "You are GPTCraft, an intelligent thinking partner. Provide clear, accurate, "
-        "and well-structured markdown responses."
-    ),
-    "architect": (
-        "You are GPTCraft in Deep Architect Mode. Break complex problems down into "
-        "system architecture, trade-offs, data flow, and clean production-grade code."
-    ),
-    "code": (
-        "You are GPTCraft in Code Craft Mode. Prioritize clean, idiomatic, well-typed "
-        "code with concise explanations and edge-case handling."
-    ),
-    "brainstorm": (
-        "You are GPTCraft in Creative Brainstorm Mode. Generate high-leverage ideas, "
-        "unique angles, structured comparisons, and actionable next steps."
-    ),
-}
-
+CRAFT_MODES: Dict[str, str] = dict(MASTER_PROMPTS)
 
 
 def is_tier_allowed(user_tier: str, required_tier: str) -> bool:
@@ -68,8 +51,10 @@ def get_llm(tier: str = "free", model_id: Optional[str] = None,
     key = (settings.groq_api_key or "").strip()
     if not key or key.startswith(("replace_with", "test-", "your_")):
         raise HTTPException(503, "AI provider is not configured. Please try again later.")
+    mode_lower = (mode or "standard").lower()
+    temperature = MODE_TEMPERATURES.get(mode_lower, 0.7)
     return ChatGroq(
-        groq_api_key=key, model=resolve_model(tier, model_id), temperature=0.7,
+        groq_api_key=key, model=resolve_model(tier, model_id), temperature=temperature,
         max_tokens=settings.max_output_tokens, timeout=settings.generation_timeout_seconds,
         max_retries=0, **kwargs,
     )

@@ -64,6 +64,20 @@ These standards define the quality, architectural, and design judgement calls en
 - Real-time token streaming endpoints (`/chat`) must use Server-Sent Events (`text/event-stream`).
 - Handle client disconnections gracefully: ensure generator functions terminate without orphan background LLM tasks when the connection drops or the user clicks "Stop Generating" (`AbortController`).
 
+### 5.2 Agent Studio SSE Envelopes & Tool Guardrails
+- **Typed SSE Envelopes**: When running in `agent` mode, `POST /chat/stream` emits structured SSE envelopes:
+  - `thought`: Internal reasoning step (`{"thought": str}`).
+  - `action_call`: Planned tool execution (`{"actionId": str, "tool": str, "args": dict, "tier": int}`).
+  - `approval_required`: HITL confirmation payload (`{"actionId": str, "tool": str, "tier": int, "parameters": dict, "rationale": str}`).
+  - `action_result`: Tool execution result (`{"actionId": str, "tool": str, "output": str}`).
+  - `token`: Conversational prose token (`{"token": str}`).
+  - `done`: Stream completion payload with metrics.
+- **Output Truncation**: Tool outputs must be truncated to 4,000 characters before injection back into the LLM context to prevent token budget exhaustion.
+- **Path Confinement**: All file-based tools must confine paths strictly inside the active workspace root and reject path traversal attempts (`..`, absolute links outside root).
+- **Execution Timeout**: Subprocess and tool executions must enforce a hard 30-second timeout.
+- **Non-Interactive Guardrail**: Commands must execute non-interactively; any command that prompts for interactive `stdin` input must terminate and fail immediately.
+- **HITL Checkpointing**: Tier 2 and Tier 3 operations must trigger LangGraph `interrupt()`, durably saving graph state in the database checkpointer, resumed only via `POST /chat/approval`.
+
 ---
 
 ## 6. Testing & Deterministic Verification
@@ -77,4 +91,4 @@ These standards define the quality, architectural, and design judgement calls en
   ```powershell
   powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
   ```
-  Both backend pytest and frontend `tsc --noEmit` + `vite build` must pass with 0 errors.
+  Both backend pytest and frontend `npm run test:unit` + `tsc --noEmit` + `vite build` must pass with 0 errors.

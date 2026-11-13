@@ -8,6 +8,7 @@ from app.db.session import engine, SessionLocal
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.google_oauth import router as google_auth_router
+from app.api.routes.memory import router as memory_router
 from app.db.models import User, Plans
 
 # Initialize settings
@@ -67,6 +68,7 @@ app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(google_auth_router)
+app.include_router(memory_router)
 
 
 @app.get("/", tags=["health"])

@@ -4,12 +4,39 @@ Run with application traffic stopped: python -m app.db.migrate
 No quota is reset on subsequent runs. Legacy tables are retained for rollback.
 """
 from datetime import datetime, time, timedelta
-from sqlalchemy import func, select, text
+from sqlalchemy import DDL, func, select
 from app.ai.llm import PLAN_QUOTAS
 from app.db.base import Base
-from app.db.models import UserDailyLimit, DailyQuota, User, Plans, Conversation, Message
+from app.db.models import (
+    AgentApproval,
+    AgentCheckpoint,
+    AgentCheckpointBlob,
+    AgentCheckpointWrite,
+    Conversation,
+    DailyQuota,
+    GenerationDetails,
+    Message,
+    Plans,
+    QuotaReservation,
+    User,
+    UserDailyLimit,
+    UserMemory,
+    UserPreferences,
+)
 from app.db.crud_token import insert_once, utc_now
 from app.db.session import engine, SessionLocal
+
+RLS_PROTECTED_MODELS = (
+    DailyQuota,
+    QuotaReservation,
+    GenerationDetails,
+    UserPreferences,
+    UserMemory,
+    AgentApproval,
+    AgentCheckpoint,
+    AgentCheckpointBlob,
+    AgentCheckpointWrite,
+)
 
 
 def migrate(bind=engine):
@@ -18,8 +45,10 @@ def migrate(bind=engine):
         if bind.dialect.name == 'postgresql':
             # These tables are internal to the privileged backend, never browser
             # Data API resources. Owners bypass RLS; public roles get no policies.
-            for table in ('daily_quotas', 'quota_reservations', 'generation_details'):
-                db.execute(text(f'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY'))
+            preparer = bind.dialect.identifier_preparer
+            for model in RLS_PROTECTED_MODELS:
+                quoted = preparer.format_table(model.__table__)
+                db.execute(DDL(f'ALTER TABLE {quoted} ENABLE ROW LEVEL SECURITY'))
         # Include users without legacy daily rows: deleted/absent quota rows must
         # not erase request usage still evidenced by conversation history.
         today = utc_now().date()

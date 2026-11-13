@@ -28,13 +28,14 @@ Implemented on `staging` against `docs/specs/personal_agent_platform_spec.md`, `
 
 ## Release prerequisites & Next Phase Plan
 
-1. **Pre-`main` release hardening (from `staging` audit)**:
+1. **Completed pre-`main` database hardening**:
+   - **Durable Graph Checkpointing**: Replaced in-memory `MemorySaver()` with pure SQLAlchemy ORM `SQLAlchemyCheckpointSaver` (`agent_checkpoints`, `agent_checkpoint_blobs`, `agent_checkpoint_writes`) in `backend/app/ai/graph/checkpointer.py` so HITL approvals persist across worker/serverless restarts without raw SQL queries.
+   - **Expanded PostgreSQL RLS**: Updated `backend/app/db/migrate.py` via SQLAlchemy `DDL` to enable RLS on all internal tables (`daily_quotas`, `quota_reservations`, `generation_details`, `user_preferences`, `user_memories`, `agent_approvals`, `agent_checkpoints`, `agent_checkpoint_blobs`, `agent_checkpoint_writes`).
+2. **Remaining operational gates before `main` promotion**:
    - Run the explicit migration and smoke checks in [OPERATIONS.md](OPERATIONS.md).
-   - Extend PostgreSQL RLS setup in `backend/app/db/migrate.py` to also enable RLS on `user_preferences`, `user_memories`, and `agent_approvals` (currently enabled on `daily_quotas`, `quota_reservations`, `generation_details`).
    - Confirm hosted Actions results, configure branch protection requiring **Backend (sqlite)**, **Backend (postgres)**, **Frontend**, **Browser contracts**, and **Windows hook** (`#25`), and verify the Antigravity session-start hook (`#24`).
    - Scope Cloudflare Workers (`gpt-craft-backend`) build triggers to `main` only in the Cloudflare dashboard, and re-enable/trigger Vercel deployment when promoting `staging` -> `main`.
-2. **Next Phase Engineering Roadmap (Post-Epic #11)**:
-   - **Durable Graph Checkpointing**: Replace in-memory `MemorySaver()` in `backend/app/ai/graph/agent.py` with PostgreSQL-backed LangGraph checkpointing so HITL approvals (`POST /chat/approval`) survive multi-worker restarts and serverless cold starts.
+3. **Next Phase Engineering Roadmap (Post-Epic #11)**:
    - **Isolated Workspace Sandboxing**: Move `run_terminal_command` and file tools from host workspace confinement to per-session ephemeral containers/sandboxes before exposing Agent Studio to multi-tenant production users.
    - **Verified Billing & Plan Entitlements**: Implement Stripe/webhook billing verification before re-enabling paid plan upgrades (`super` / `hyper`); paid billing remains out of scope until verified.
    - **Live Provider & Staging Smoke Automation**: Add an optional credentialed smoke test script for Supabase Auth + live Groq/MCP servers before promoting `staging` to `main`.

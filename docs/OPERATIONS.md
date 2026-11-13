@@ -65,12 +65,14 @@ old application. Do not blindly switch back to stale legacy counters.
 
 ## Contracts
 
-Existing auth/quota responses use camelCase. Chat/history/conversation fields and
-SSE metadata retain snake_case for compatibility. SSE uses data frames with
-`type`: start, chunk, done, or error. Start provides Conversation identity before
-output; only done confirms successful completion. EOF without done is interrupted.
-Future Agent Studio envelopes must be coordinated with #11/#12, not silently
-introduced into this parser.
+Existing auth/quota responses use camelCase. Conversational chat/history/conversation
+fields and legacy SSE metadata retain snake_case (`type`: `start`, `chunk`,
+`done`, or `error`, where `start` provides Conversation identity before output and
+only `done` confirms successful completion). Agent Studio (`mode == "agent"`)
+emits typed SSE `event:` envelopes (`thought`, `token`, `action_call`,
+`approval_required`, `action_result`, `done`, `error`) using camelCase payloads
+per [personal_agent_platform_spec.md](specs/personal_agent_platform_spec.md). EOF
+without `done` is treated as interrupted.
 
 The catalog exposes actual Groq model IDs: `openai/gpt-oss-20b` (free+) and
 `openai/gpt-oss-120b` (hyper). Legacy llama3-8b-8192, gemma-7b-it, and
@@ -83,7 +85,7 @@ permissions and live availability still require a credentialed smoke check.
 
 Windows: `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1`.
 POSIX: from backend run `.venv/bin/python -m pytest -q`; from frontend run
-`npm run lint`, `npm test`, and `npm run build`. For PostgreSQL set
+`npm run lint`, `npm run test:unit`, `npm test`, and `npm run build`. For PostgreSQL set
 `GPTCRAFT_TEST_DATABASE_URL` to a dedicated database containing `test` in its name.
 Tests recreate tables in that database. Never use a production connection.
 
@@ -100,6 +102,23 @@ The Windows hook check runs the configured command from root and nested director
 and validates its JSON. Finish runtime verification by starting a fresh Antigravity
 session and confirming repository/branch context and a memory retrieval status.
 Missing or timed-out memory must be explicit; only a count of facts naming GPTCraft is reported. Memory text is never automatically printed; retrieve selected project facts deliberately through the helper.
+
+## Branching, staging, and deployment control
+
+Development follows a three-tier integration flow (`feature -> staging -> main`) so
+changes can be integrated and verified together before hitting production:
+
+1. **Feature branches (`feat/...`, `fix/...`)** open PRs against **`staging`**,
+   gated by the `Verify` GitHub Actions workflow.
+2. **Held auto-deployments on push**: Vercel Git auto-deployments are disabled via
+   `"git": { "deploymentEnabled": false }` in root `vercel.json` and
+   `frontend/vercel.json`. Manage Cloudflare Workers (`gpt-craft-backend`) build
+   triggers in the Cloudflare dashboard so only approved `main` promotions deploy.
+3. **Staging soak & release PR (`staging -> main`)**: After running full-stack checks
+   and operator smoke tests on `staging`, open a release PR from `staging` to `main`.
+4. **Promotion**: Run the maintenance-window `python -m app.db.migrate` step first,
+   promote `staging` -> `main`, trigger or re-enable production deployment, and run
+   post-deploy smoke checks.
 
 Before promotion: confirm schema migration, successful hosted checks, real sign-in,
 a real chat, displayed model identity, quota settlement, and Stop behavior through

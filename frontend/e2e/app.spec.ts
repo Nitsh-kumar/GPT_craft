@@ -44,3 +44,41 @@ test('subscription controls cannot grant paid entitlements', async ({ page }) =>
   await expect(page.getByTestId('select-plan-hyper')).toBeDisabled();
   await expect(page.getByText('Paid plan changes are not available yet.', { exact:false })).toBeVisible();
 });
+
+test('agent studio displays telemetry drawer, diff inspector, and resumes after approval', async ({ page }) => {
+  await page.route('**/chat/stream', route => route.fulfill({ contentType:'text/event-stream', body:
+    'event: thought\ndata: {"thought":"Inspecting README before editing"}\n\n' +
+    'event: action_call\ndata: {"actionId":"act_1","tool":"read_workspace_file","args":{"path":"README.md"},"tier":1}\n\n' +
+    'event: action_result\ndata: {"actionId":"act_1","tool":"read_workspace_file","output":"1: # GPTCraft","durationMs":45,"exitCode":0}\n\n' +
+    'event: approval_required\ndata: {"actionId":"act_2","tool":"edit_workspace_file","tier":2,"parameters":{"path":"README.md","content":"# GPTCraft\\nUpdated"},"rationale":"Add tagline to README","diff":"--- a/README.md\\n+++ b/README.md\\n@@ -1,1 +1,2 @@\\n # GPTCraft\\n+Updated"}\n\n' +
+    'event: done\ndata: {"status":"awaiting_approval","conversationId":"1","modelUsed":"openai/gpt-oss-20b","modeUsed":"agent"}\n\n'
+  }));
+
+  await page.route('**/chat/approval', async route => {
+    const body = route.request().postDataJSON() as { actionId: string; decision: string };
+    expect(body.actionId).toBe('act_2');
+    expect(body.decision).toBe('approve');
+    await route.fulfill({ contentType:'text/event-stream', body:
+      'event: action_result\ndata: {"actionId":"act_2","tool":"edit_workspace_file","output":"Updated README.md"}\n\n' +
+      'event: token\ndata: {"token":"Applied your approved update to README.md."}\n\n' +
+      'event: done\ndata: {"status":"completed","conversationId":"1","modelUsed":"openai/gpt-oss-20b","modeUsed":"agent","tokensUsed":85,"tokensRemaining":4915}\n\n'
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByTestId('craft-mode-agent').click();
+  await page.getByTestId('chat-input').fill('Update README.md with a tagline');
+  await page.getByTestId('send-button').click();
+
+  await expect(page.getByTestId('telemetry-drawer')).toBeVisible();
+  await expect(page.getByTestId('telemetry-actions-count')).toContainText('1 tool call');
+  await expect(page.getByTestId('telemetry-thoughts-count')).toContainText('1 thought');
+  await expect(page.getByTestId('telemetry-total-latency')).toContainText('45ms');
+
+  await expect(page.getByTestId('approval-card')).toBeVisible();
+  await expect(page.getByTestId('diff-viewer')).toContainText('+Updated');
+
+  await page.getByTestId('approval-approve-btn').click();
+  await expect(page.getByText('Applied your approved update to README.md.')).toBeVisible();
+  await expect(page.getByTestId('approval-card')).toBeHidden();
+});

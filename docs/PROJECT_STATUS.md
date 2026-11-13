@@ -23,8 +23,8 @@ Tracking implementation against `docs/specs/personal_agent_platform_spec.md`, `d
 - [x] **Ticket 2 (#13)**: Cyclical LangGraph ReAct Loop & Tier 1 Workspace Tools (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`, 4,000-char truncation)
 - [x] **Ticket 3 (#14)**: Human-In-The-Loop (HITL) Interruption & Approval Cards (LangGraph `interrupt()`, DB checkpointing, `POST /chat/approval` resumption, interactive confirmation cards)
 - [x] **Ticket 4 (#15)**: Command Execution Guardrails & Process Timeouts (`run_terminal_command`, path jailing, 30-second execution timeouts, non-interactive stdin rejection)
-- [ ] **Ticket 5 (#16)**: Model Context Protocol (MCP) Client Manager (stdio and sse client manager, dynamic tool translation to LangChain structured tools)
-- [ ] **Ticket 6 (#17)**: Action Telemetry Drawer, Diff Inspector & E2E Studio Polish (collapsible telemetry drawer, syntax-highlighted diffs, e2e test suite)
+- [x] **Ticket 5 (#16)**: Model Context Protocol (MCP) Client Manager (stdio and sse client manager, dynamic tool translation to LangChain structured tools, wired into `agent.py` with offline mock server tests)
+- [x] **Ticket 6 (#17)**: Action Telemetry Drawer, Diff Inspector & E2E Studio Polish (collapsible `TelemetryDrawer`, line-numbered syntax-highlighted diffs & terminal viewer in `ApprovalCard`, `telemetry.test.ts` + isolated Playwright `app.spec.ts` spec)
 
 ## Release prerequisites
 

@@ -20,7 +20,9 @@ then perform a clean hashed install and run verification. Never hand-edit hashes
 
 ## Migration before deployment
 
-This release adds `daily_quotas`, `quota_reservations`, and `generation_details`.
+This release adds `daily_quotas`, `quota_reservations`, `generation_details`,
+`user_preferences`, `user_memories`, `agent_approvals`, `agent_checkpoints`,
+`agent_checkpoint_blobs`, and `agent_checkpoint_writes`.
 Application import no longer creates tables or seeds data. Stop chat traffic,
 back up the database, and run with the **backend database owner** credentials:
 
@@ -30,13 +32,16 @@ python -m app.db.migrate
 ```
 
 Run once before promoting the new application; rerunning preserves existing
-allowances and reservations. The migration creates new tables, imports the
+allowances, reservations, and checkpoints. The migration creates new tables, imports the
 smallest non-negative remaining allowance from duplicate legacy daily rows, and
 backfills request usage from retained user Messages. Deleted historical Messages
 cannot be recovered; historical request counts are a lower bound. Legacy tables
-remain available for rollback. The new quota and metadata tables have RLS enabled
-on PostgreSQL, with no browser policies; the privileged backend owner accesses
-them. They are not resources for direct frontend Data API access.
+remain available for rollback. All internal backend tables (`daily_quotas`,
+`quota_reservations`, `generation_details`, `user_preferences`, `user_memories`,
+`agent_approvals`, `agent_checkpoints`, `agent_checkpoint_blobs`, and
+`agent_checkpoint_writes`) have RLS enabled on PostgreSQL via SQLAlchemy `DDL`,
+with no browser policies; the privileged backend owner accesses them. They are not
+resources for direct frontend Data API access.
 
 Keep traffic stopped across migration and promotion: mixing old and new
 accounting code can reset or lose usage. On rollback, stop traffic again and

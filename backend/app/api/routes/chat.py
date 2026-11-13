@@ -1,10 +1,11 @@
+import json
+from contextlib import aclosing
+from typing import List, Optional
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, Request, HTTPException, Response
-from fastapi.responses import StreamingResponse
-from typing import List
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.api.streaming import CancellableStreamingResponse
 from app.db.session import get_db
 from app.schemas.chat import (
     ChatRequest,
@@ -13,13 +14,15 @@ from app.schemas.chat import (
     MessageResponse,
     ModelInfoResponse,
     QuotaResponse,
+    ApprovalDecisionRequest,
+    ApprovalPendingResponse,
 )
 from app.services.chat import ChatService
 from app.services.auth import AuthService
 from app.db.models import User
 from app.db.crud_token import TokenUsageCRUD
 from app.db.crud_chat import ChatCRUD
-from app.ai.llm import MODEL_CATALOG, PLAN_QUOTAS
+from app.ai.llm import MODEL_CATALOG
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -30,7 +33,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return AuthService.get_user_by_token(token, db)
 
 
-limiter = Limiter(key_func=get_remote_address)
+def _format_sse_frame(event: dict) -> str:
+    payload = dict(event)
+    sse_event = payload.pop("_sse_event", None)
+    if sse_event:
+        return f"event: {sse_event}\ndata: {json.dumps(payload)}\n\n"
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 @router.get("/models", response_model=List[ModelInfoResponse])
@@ -50,36 +58,7 @@ def list_models():
 @router.get("/quota", response_model=QuotaResponse)
 def get_quota(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Get the current user's token and request quota"""
-    from datetime import date, datetime
-    from app.db.models import Conversation, Message
-
-    tier = getattr(current_user, "plan", "free").lower()
-    tier_quota = PLAN_QUOTAS.get(tier, PLAN_QUOTAS["free"])
-    total_tokens = tier_quota["tokens"]
-    total_requests = tier_quota["requests"]
-
-    user_limit = TokenUsageCRUD.get_user_limit(db, current_user.id)
-    if not user_limit:
-        user_limit = TokenUsageCRUD.create_user_limit(db, current_user.id, initial_limit=total_tokens)
-
-    today_start = datetime.combine(date.today(), datetime.min.time())
-    requests_used = (
-        db.query(Message)
-        .join(Conversation)
-        .filter(
-            Conversation.user_id == current_user.id,
-            Message.role == "user",
-            Message.created_at >= today_start,
-        )
-        .count()
-    )
-
-    return {
-        "requestsRemaining": max(0, total_requests - requests_used),
-        "tokensRemaining": user_limit.daily_limit,
-        "totalRequests": total_requests,
-        "totalTokens": total_tokens,
-    }
+    return TokenUsageCRUD.quota(db, current_user.id, current_user.plan.lower())
 
 
 @router.get("/conversations", response_model=List[ConversationResponse])
@@ -97,6 +76,70 @@ def get_history(conversation_id: int, current_user: User = Depends(get_current_u
     return ChatCRUD.get_messages_for_conversation(db, conversation_id)
 
 
+@router.post("/approval")
+async def chat_approval_endpoint(
+    body: ApprovalDecisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Resume agent execution after approving, modifying, or rejecting a Tier 2 action"""
+    prepared = await run_in_threadpool(
+        ChatService.prepare_approval,
+        db=db,
+        user_id=current_user.id,
+        user_tier=current_user.plan.lower(),
+        action_id=body.actionId,
+        decision=body.decision,
+        modified_params=body.modifiedParams,
+        feedback=body.feedback,
+    )
+
+    async def stream():
+        async with aclosing(ChatService.approval_events(prepared)) as events:
+            async for event in events:
+                yield _format_sse_frame(event)
+
+    return CancellableStreamingResponse(
+        stream(),
+        on_disconnect=prepared.cancel.set,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/{conversation_id}/approval", response_model=Optional[ApprovalPendingResponse])
+def get_pending_approval_endpoint(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get active pending approval request for a conversation if one exists"""
+    conversation = ChatCRUD.get_conversation(db, conversation_id)
+    if not conversation or conversation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    approval = ChatCRUD.get_pending_approval(db, conversation_id, current_user.id)
+    if not approval:
+        return None
+
+    try:
+        params = json.loads(approval.parameters)
+    except Exception:
+        params = {"raw": approval.parameters}
+
+    return ApprovalPendingResponse(
+        actionId=approval.id,
+        conversationId=approval.conversation_id,
+        tool=approval.tool_name,
+        toolName=approval.tool_name,
+        tier=approval.tier,
+        parameters=params,
+        rationale=approval.rationale,
+        diff=approval.diff,
+        status=approval.status,
+    )
+
+
 @router.delete("/{conversation_id}", status_code=204)
 def delete_conversation(conversation_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete an owned conversation and its messages"""
@@ -106,42 +149,61 @@ def delete_conversation(conversation_id: int, current_user: User = Depends(get_c
     return Response(status_code=204)
 
 
-@router.post("/stream")
-def chat_stream_endpoint(
-    request: Request,
-    body: ChatRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Stream AI chat response via Server-Sent Events (SSE)"""
-    tier = getattr(current_user, "plan", "free").lower()
-    generator = ChatService.stream_chat(
-        message=body.message,
-        conversation_id=body.conversation_id,
-        user_id=current_user.id,
-        user_tier=tier,
-        db=db,
-        model_id=body.model,
-        mode=body.mode,
+async def prepare_chat(body, current_user, db):
+    return await run_in_threadpool(
+        ChatService.prepare, message=body.message, conversation_id=body.conversation_id,
+        user_id=current_user.id, user_tier=current_user.plan.lower(), db=db,
+        model_id=body.model, mode=body.mode,
+        request_id=str(body.request_id) if body.request_id else None,
     )
-    return StreamingResponse(generator, media_type="text/event-stream")
+
+
+@router.post("/stream")
+async def chat_stream_endpoint(
+    request: Request, body: ChatRequest,
+    current_user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    prepared = await prepare_chat(body, current_user, db)
+
+    async def stream():
+        async with aclosing(ChatService.events(prepared)) as events:
+            async for event in events:
+                yield _format_sse_frame(event)
+
+    return CancellableStreamingResponse(
+        stream(),
+        on_disconnect=prepared.cancel.set,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("", response_model=ChatResponse)
-def chat_endpoint(
-    request: Request,
-    body: ChatRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+async def chat_endpoint(
+    request: Request, body: ChatRequest,
+    current_user=Depends(get_current_user), db: Session = Depends(get_db),
 ):
-    """Chat with the AI under token policy enforcement and tier-based model routing"""
-    tier = getattr(current_user, "plan", "free").lower()
-    return ChatService.process_chat(
-        body.message,
-        body.conversation_id,
-        current_user.id,
-        tier,
-        db,
-        model_id=body.model,
-        mode=body.mode,
-    )
+    prepared = await prepare_chat(body, current_user, db)
+    text = ""
+    result = None
+    # Close and settle before raising an HTTP error or returning a response.
+    async with aclosing(ChatService.events(prepared)) as events:
+        async for event in events:
+            sse_event = event.get("_sse_event")
+            event_type = sse_event or event.get("type")
+            if event_type == "chunk":
+                text += event["content"]
+            elif event_type == "token":
+                text += event["token"]
+            elif event_type == "error":
+                raise HTTPException(event.get("status", 502), event["error"])
+            elif event_type == "done":
+                result = {
+                    "conversation_id": event.get("conversation_id", event.get("conversationId", prepared.conversation_id)),
+                    "tokens_used": event.get("tokens_used", event.get("tokensUsed", 0)),
+                    "tokens_remaining": event.get("tokens_remaining", event.get("tokensRemaining", 0)),
+                    "model_used": event.get("model_used", event.get("modelUsed", prepared.model)),
+                    "mode_used": event.get("mode_used", event.get("modeUsed", prepared.mode)),
+                    "usage_estimated": event.get("usage_estimated", False),
+                }
+    return ChatResponse(response=text, **(result or {}))

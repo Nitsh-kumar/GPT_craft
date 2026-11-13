@@ -22,6 +22,7 @@ export const ChatPage = () => {
     setSelectedModel,
     setSelectedMode,
     sendMessage,
+    handleApprovalDecision,
     stopGeneration,
     clearChat,
     selectConversation,
@@ -73,8 +74,9 @@ export const ChatPage = () => {
           selectedModelName={models.find(m => m.id === selectedModel)?.name}
           onQuickPrompt={(prompt, mode) => {
             if (mode) setSelectedMode(mode);
-            sendMessage(prompt);
+            sendMessage(prompt, mode);
           }}
+          onApprovalDecision={handleApprovalDecision}
         />
 
         {/* Input Area */}

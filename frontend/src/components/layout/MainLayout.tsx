@@ -1,8 +1,9 @@
 import React, { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, Plus, Trash2, Menu, X, ArrowUpRight } from 'lucide-react';
+import { LogOut, Plus, Trash2, Menu, X, ArrowUpRight, Brain } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ThemeSwitcher } from './ThemeSwitcher';
+import { PersonalizationModal } from '../chat/PersonalizationModal';
 import { cn } from '../../utils/cn';
 
 interface MainLayoutProps {
@@ -25,6 +26,7 @@ export const MainLayout = ({
 }: MainLayoutProps) => {
   const { user, logout } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [personalizationOpen, setPersonalizationOpen] = useState(false);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -121,6 +123,19 @@ export const MainLayout = ({
       </nav>
 
       <div className="space-y-3 border-t border-line p-3">
+        <button
+          type="button"
+          onClick={() => {
+            setPersonalizationOpen(true);
+            setDrawerOpen(false);
+          }}
+          data-testid="personalization-button"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-xs font-medium text-ink-2 transition-colors hover:bg-sunken hover:text-ink"
+        >
+          <Brain size={15} className="text-ember" />
+          <span>Personalization & Memory</span>
+        </button>
+
         <div className="flex items-center justify-between px-1">
           <span className="text-xs font-medium text-ink-3">Appearance</span>
           <ThemeSwitcher />
@@ -145,6 +160,19 @@ export const MainLayout = ({
               <ArrowUpRight size={12} className="opacity-70" />
             </Link>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPersonalizationOpen(true);
+              setDrawerOpen(false);
+            }}
+            data-testid="user-personalization-button"
+            className="rounded-lg p-2 text-ink-3 transition-colors hover:bg-sunken hover:text-ember"
+            title="Personalization & Memory"
+            aria-label="Personalization & Memory"
+          >
+            <Brain size={17} />
+          </button>
           <button
             onClick={logout}
             data-testid="logout-button"
@@ -210,6 +238,11 @@ export const MainLayout = ({
 
         <div className="relative flex flex-1 flex-col overflow-hidden">{children}</div>
       </main>
+
+      <PersonalizationModal
+        isOpen={personalizationOpen}
+        onClose={() => setPersonalizationOpen(false)}
+      />
     </div>
   );
 };

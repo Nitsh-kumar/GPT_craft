@@ -1,13 +1,15 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
+from uuid import UUID
 
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=16000)
     conversation_id: Optional[int] = None
     model: Optional[str] = None
     mode: Optional[str] = "standard"
+    request_id: Optional[UUID] = None
 
 
 class ChatResponse(BaseModel):
@@ -15,6 +17,7 @@ class ChatResponse(BaseModel):
     tokens_used: int
     tokens_remaining: int
     conversation_id: int
+    usage_estimated: bool = False
     model_used: Optional[str] = None
     mode_used: Optional[str] = "standard"
 
@@ -24,6 +27,8 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+    model_used: Optional[str] = None
+    mode_used: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,3 +54,22 @@ class ModelInfoResponse(BaseModel):
     name: str
     description: str
     requiredPlan: str
+
+
+class ApprovalDecisionRequest(BaseModel):
+    actionId: str
+    decision: str
+    modifiedParams: Optional[dict] = None
+    feedback: Optional[str] = None
+
+
+class ApprovalPendingResponse(BaseModel):
+    actionId: str
+    conversationId: int
+    tool: str
+    toolName: Optional[str] = None
+    tier: int
+    parameters: dict
+    rationale: str
+    diff: Optional[str] = None
+    status: str

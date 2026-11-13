@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { CraftMode, Message, Model } from '../types';
+import { CraftMode, Message, Model, ConversationResponse } from '../types';
 import { chatService } from '../services/chatService';
 
 export const useChat = () => {
@@ -9,9 +9,10 @@ export const useChat = () => {
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [selectedMode, setSelectedMode] = useState<CraftMode>('standard');
-  const [conversations, setConversations] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<ConversationResponse[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   
+  const selectionRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -23,7 +24,7 @@ export const useChat = () => {
           setSelectedModel(availableModels[0].id);
         }
       } catch (err) {
-        console.error('Failed to fetch models', err);
+        setError('Unable to load available models. Please reload to retry.');
       }
     };
     fetchModels();
@@ -43,26 +44,43 @@ export const useChat = () => {
   }, [loadConversations]);
 
   const selectConversation = useCallback(async (id: string | null) => {
+    const selection = ++selectionRef.current;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setError(null);
     setCurrentConversationId(id);
     if (!id) {
       setMessages([]);
+      setIsGenerating(false);
       return;
     }
     setIsGenerating(true);
     try {
       const history = await chatService.getHistory(id);
-      const mapped = history.map((msg: any) => ({
+      const mapped: Message[] = history.map((msg) => ({
         id: msg.id.toString(),
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
-        timestamp: msg.created_at
+        timestamp: msg.created_at,
+        modelUsed: msg.model_used || undefined,
+        modeUsed: msg.mode_used || undefined,
+        status: 'complete' as const,
       }));
-      setMessages(mapped);
+      try {
+        const pending = await chatService.getPendingApproval(id);
+        if (pending && mapped.length > 0) {
+          const lastMsg = mapped[mapped.length - 1];
+          lastMsg.approvalRequired = pending;
+        }
+      } catch (e) {
+        console.warn('Failed to load pending approval', e);
+      }
+      if (selectionRef.current === selection) setMessages(mapped);
     } catch (err) {
       console.error('Failed to load history', err);
-      setError('Failed to load conversation history');
+      if (selectionRef.current === selection) setError('Failed to load conversation history');
     } finally {
-      setIsGenerating(false);
+      if (selectionRef.current === selection) setIsGenerating(false);
     }
   }, []);
 
@@ -79,14 +97,17 @@ export const useChat = () => {
     }
   }, [currentConversationId]);
 
-  const sendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || !selectedModel) return;
+  const sendMessage = useCallback(async (content: string, modeOverride?: CraftMode) => {
+    if (!content.trim() || !selectedModel || abortControllerRef.current) return;
+
+    const activeMode = modeOverride ?? selectedMode;
 
     const newUserMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
+      mode: activeMode,
     };
 
     setMessages((prev) => [...prev, newUserMessage]);
@@ -98,21 +119,29 @@ export const useChat = () => {
       id: assistantMessageId,
       role: 'assistant',
       content: '',
+      status: 'streaming',
+      modelUsed: selectedModel,
+      modeUsed: activeMode,
       timestamp: new Date().toISOString(),
+      mode: activeMode,
+      thoughts: [],
+      actions: [],
     };
 
     setMessages((prev) => [...prev, newAssistantMessage]);
 
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const history = [...messages, newUserMessage];
-      
+
       const result = await chatService.streamMessage(
         currentConversationId,
         selectedModel,
         history,
         (chunk) => {
+          if (controller.signal.aborted) return;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId
@@ -121,24 +150,134 @@ export const useChat = () => {
             )
           );
         },
-        abortControllerRef.current.signal,
-        selectedMode
+        controller.signal,
+        activeMode,
+        (event) => {
+          if (controller.signal.aborted) return;
+          if (event.type === 'thought') {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? { ...msg, thoughts: [...(msg.thoughts || []), event.thought] }
+                  : msg
+              )
+            );
+          } else if (event.type === 'action_call') {
+            const now = Date.now();
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id !== assistantMessageId) return msg;
+                const currentActions = msg.actions || [];
+                const exists = currentActions.some((a) => a.actionId === event.actionId);
+                if (exists) return msg;
+                return {
+                  ...msg,
+                  actions: [
+                    ...currentActions,
+                    {
+                      actionId: event.actionId,
+                      tool: event.tool,
+                      args: event.args,
+                      tier: event.tier,
+                      startTime: now,
+                      status: 'running',
+                    },
+                  ],
+                };
+              })
+            );
+          } else if (event.type === 'action_result') {
+            const now = Date.now();
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id !== assistantMessageId) return msg;
+                const currentActions = msg.actions || [];
+                const idx = currentActions.findIndex((a) => a.actionId === event.actionId);
+                if (idx >= 0) {
+                  const updated = [...currentActions];
+                  const existing = updated[idx];
+                  const calculatedDuration =
+                    existing.startTime !== undefined ? Math.max(1, now - existing.startTime) : undefined;
+                  const finalDuration = event.durationMs ?? calculatedDuration;
+                  const isError =
+                    (event.exitCode !== undefined && event.exitCode !== 0) ||
+                    event.output.startsWith('Error:') ||
+                    event.output.includes('Traceback (most recent call last)');
+                  updated[idx] = {
+                    ...existing,
+                    output: event.output,
+                    durationMs: finalDuration,
+                    exitCode: event.exitCode,
+                    status: (event.status as any) || (isError ? 'failed' : 'completed'),
+                  };
+                  return { ...msg, actions: updated };
+                }
+                return {
+                  ...msg,
+                  actions: [
+                    ...currentActions,
+                    {
+                      actionId: event.actionId,
+                      tool: event.tool,
+                      args: {},
+                      tier: 1,
+                      output: event.output,
+                      durationMs: event.durationMs,
+                      exitCode: event.exitCode,
+                      status: (event.status as any) || 'completed',
+                    },
+                  ],
+                };
+              })
+            );
+          } else if (event.type === 'approval_required') {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantMessageId
+                  ? {
+                      ...msg,
+                      approvalRequired: {
+                        actionId: event.actionId,
+                        tool: event.tool,
+                        tier: event.tier,
+                        parameters: event.parameters,
+                        rationale: event.rationale,
+                        diff: event.diff,
+                      },
+                    }
+                  : msg
+              )
+            );
+          }
+        },
+        (event) => {
+          if (controller.signal.aborted) return;
+          setCurrentConversationId(String(event.conversation_id));
+          loadConversations();
+        }
       );
 
+      if (controller.signal.aborted) return;
+      setMessages(prev => prev.map(msg => msg.id === assistantMessageId
+        ? { ...msg, status: 'complete', modelUsed: result.modelUsed, modeUsed: result.modeUsed } : msg));
       if (!currentConversationId && result.conversationId) {
         setCurrentConversationId(result.conversationId);
         loadConversations();
       }
       
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
+    } catch (err: unknown) {
+      setMessages(prev => prev.map(msg => msg.id === assistantMessageId
+        ? { ...msg, status: 'interrupted' } : msg));
+      if (err instanceof Error && err.name === 'AbortError') {
         console.log('Stream aborted by user');
       } else {
-        setError(err.message || 'An error occurred while generating the response.');
+        setError(err instanceof Error ? err.message : 'Generation failed.');
       }
     } finally {
-      setIsGenerating(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller) {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
     }
   }, [messages, selectedModel, selectedMode, currentConversationId, loadConversations]);
 
@@ -147,19 +286,164 @@ export const useChat = () => {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsGenerating(false);
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.role !== 'assistant' || !msg.actions) return msg;
+          const updatedActions = msg.actions.map((action) =>
+            action.output === undefined
+              ? {
+                  ...action,
+                  output: '[Execution aborted by user]',
+                  status: 'aborted' as const,
+                }
+              : action
+          );
+          return { ...msg, actions: updatedActions };
+        })
+      );
     }
   }, []);
 
+  const handleApprovalDecision = useCallback(
+    async (
+      actionId: string,
+      decision: 'approve' | 'modify' | 'reject',
+      modifiedParams?: Record<string, unknown>,
+      feedback?: string
+    ) => {
+      setIsGenerating(true);
+      setError(null);
+      abortControllerRef.current = new AbortController();
+
+      let targetMessageId: string | null = null;
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.approvalRequired?.actionId === actionId) {
+            targetMessageId = msg.id;
+            return { ...msg, approvalRequired: undefined };
+          }
+          return msg;
+        })
+      );
+
+      try {
+        await chatService.submitApproval(
+          actionId,
+          decision,
+          modifiedParams,
+          feedback,
+          (chunk) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === targetMessageId
+                  ? { ...msg, content: (msg.content || '') + chunk }
+                  : msg
+              )
+            );
+          },
+          (event) => {
+            if (event.type === 'action_result') {
+              const now = Date.now();
+              setMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.id !== targetMessageId) return msg;
+                  const currentActions = msg.actions || [];
+                  const idx = currentActions.findIndex((a) => a.actionId === event.actionId);
+                  if (idx >= 0) {
+                    const updated = [...currentActions];
+                    const existing = updated[idx];
+                    const calculatedDuration =
+                      existing.startTime !== undefined ? Math.max(1, now - existing.startTime) : undefined;
+                    const finalDuration = event.durationMs ?? calculatedDuration;
+                    const isError =
+                      (event.exitCode !== undefined && event.exitCode !== 0) ||
+                      event.output.startsWith('Error:') ||
+                      event.output.includes('Traceback (most recent call last)');
+                    updated[idx] = {
+                      ...existing,
+                      output: event.output,
+                      durationMs: finalDuration,
+                      exitCode: event.exitCode,
+                      status: (event.status as any) || (isError ? 'failed' : 'completed'),
+                    };
+                    return { ...msg, actions: updated };
+                  }
+                  return {
+                    ...msg,
+                    actions: [
+                      ...currentActions,
+                      {
+                        actionId: event.actionId,
+                        tool: event.tool,
+                        args: {},
+                        tier: 2,
+                        output: event.output,
+                        durationMs: event.durationMs,
+                        exitCode: event.exitCode,
+                        status: (event.status as any) || 'completed',
+                      },
+                    ],
+                  };
+                })
+              );
+            } else if (event.type === 'approval_required') {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === targetMessageId
+                    ? {
+                        ...msg,
+                        approvalRequired: {
+                          actionId: event.actionId,
+                          tool: event.tool,
+                          tier: event.tier,
+                          parameters: event.parameters,
+                          rationale: event.rationale,
+                          diff: event.diff,
+                        },
+                      }
+                    : msg
+                )
+              );
+            } else if (event.type === 'thought') {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === targetMessageId
+                    ? { ...msg, thoughts: [...(msg.thoughts || []), event.thought] }
+                    : msg
+                )
+              );
+            }
+          },
+          abortControllerRef.current.signal
+        );
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log('Approval stream aborted');
+        } else {
+          setError(err.message || 'Error executing approval decision');
+        }
+      } finally {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
+    },
+    []
+  );
+
   const clearChat = useCallback(() => {
+    ++selectionRef.current;
     setMessages([]);
     setError(null);
     setCurrentConversationId(null);
     stopGeneration();
   }, [stopGeneration]);
 
+  useEffect(() => () => { abortControllerRef.current?.abort(); }, []);
+
   return {
     messages,
     isGenerating,
+    isStreaming: isGenerating,
     error,
     models,
     selectedModel,
@@ -169,6 +453,7 @@ export const useChat = () => {
     setSelectedModel,
     setSelectedMode,
     sendMessage,
+    handleApprovalDecision,
     stopGeneration,
     clearChat,
     selectConversation,

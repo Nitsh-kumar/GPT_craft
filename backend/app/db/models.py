@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Date, LargeBinary
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -218,3 +218,41 @@ class GenerationDetails(Base):
     model_used = Column(String, nullable=False)
     mode_used = Column(String, nullable=False)
     message = relationship("Message", back_populates="generation")
+
+
+class AgentCheckpoint(Base):
+    """Durable LangGraph state checkpoint persisted via SQLAlchemy ORM."""
+    __tablename__ = "agent_checkpoints"
+    thread_id = Column(String, primary_key=True)
+    checkpoint_ns = Column(String, primary_key=True, default="")
+    checkpoint_id = Column(String, primary_key=True)
+    parent_checkpoint_id = Column(String, nullable=True)
+    checkpoint_type = Column(String, nullable=False)
+    checkpoint_data = Column(LargeBinary, nullable=False)
+    metadata_type = Column(String, nullable=False)
+    metadata_data = Column(LargeBinary, nullable=False)
+
+
+class AgentCheckpointBlob(Base):
+    """Serialized channel values referenced by LangGraph checkpoints."""
+    __tablename__ = "agent_checkpoint_blobs"
+    thread_id = Column(String, primary_key=True)
+    checkpoint_ns = Column(String, primary_key=True, default="")
+    channel = Column(String, primary_key=True)
+    version = Column(String, primary_key=True)
+    blob_type = Column(String, nullable=False)
+    blob_data = Column(LargeBinary, nullable=True)
+
+
+class AgentCheckpointWrite(Base):
+    """Pending LangGraph task writes associated with an active checkpoint."""
+    __tablename__ = "agent_checkpoint_writes"
+    thread_id = Column(String, primary_key=True)
+    checkpoint_ns = Column(String, primary_key=True, default="")
+    checkpoint_id = Column(String, primary_key=True)
+    task_id = Column(String, primary_key=True)
+    idx = Column(Integer, primary_key=True)
+    channel = Column(String, nullable=False)
+    write_type = Column(String, nullable=False)
+    write_data = Column(LargeBinary, nullable=False)
+    task_path = Column(String, nullable=False, default="")

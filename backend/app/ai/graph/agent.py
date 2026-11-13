@@ -5,9 +5,9 @@ from typing import List, Optional
 import httpx
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
+from app.ai.graph.checkpointer import SQLAlchemyCheckpointSaver
 from app.ai.graph.state import AgentState
 from app.ai.llm import get_llm, CRAFT_MODES
 from app.ai.mcp import mcp_manager
@@ -138,7 +138,7 @@ graph_builder.set_entry_point("chatbot")
 graph_builder.add_conditional_edges("chatbot", tools_condition)
 graph_builder.add_edge("tools", "chatbot")
 
-checkpointer = MemorySaver()
+checkpointer = SQLAlchemyCheckpointSaver()
 compiled_graph = graph_builder.compile(checkpointer=checkpointer)
 
 

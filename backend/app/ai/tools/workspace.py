@@ -1,4 +1,5 @@
 import os
+import sys
 import difflib
 import uuid
 import subprocess
@@ -457,6 +458,9 @@ def run_terminal_command(
             except (ValueError, AttributeError):
                 return f"Error: Access denied: command path '{clean}' escapes workspace root."
         elif os.path.isabs(clean) and len(clean) > 3:
+            if os.path.normcase(os.path.abspath(clean)) == os.path.normcase(os.path.abspath(sys.executable)):
+                # Virtualenv interpreters are often symlinks to toolchain binaries outside the repo.
+                continue
             try:
                 candidate = Path(clean).resolve()
                 if candidate.exists() and not is_path_within_root(candidate, resolved_root):

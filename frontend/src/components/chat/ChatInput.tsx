@@ -128,7 +128,13 @@ export const ChatInput = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? "You've used today's quota. Upgrade or come back tomorrow." : selectedMode === 'agent' ? 'Assign a workspace task or goal for Agent Studio…' : `Message ${selected?.name || 'GPTCraft'}…`}
+            placeholder={
+              disabled
+                ? "You've used today's quota. Please come back tomorrow."
+                : selectedMode === 'agent'
+                  ? 'Assign a workspace task or goal for Agent Studio…'
+                  : `Message ${selected?.name || 'GPTCraft'}…`
+            }
             disabled={disabled || isGenerating}
             className="m-0 block max-h-52 w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-4 pb-2 text-[0.95rem] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus:ring-0 focus-visible:outline-none"
             rows={1}

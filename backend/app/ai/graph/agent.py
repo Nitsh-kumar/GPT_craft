@@ -1,13 +1,17 @@
+"""Async graph: native model chunks propagate through stream_mode='messages' with HITL tools."""
+import asyncio
 import uuid
 from typing import List, Optional
+import httpx
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from app.ai.graph.state import AgentState
-from app.ai.llm import get_llm, CRAFT_MODES, LocalCraftLLM
-from app.ai.tools.workspace import TIER_1_TOOLS, TIER_2_TOOLS, run_terminal_command
+from app.ai.llm import get_llm, CRAFT_MODES
+from app.ai.tools.workspace import TIER_1_TOOLS, TIER_2_TOOLS
+from app.core.config import get_settings
 
 # Define tools here (Tier 1 read-only tools + Tier 2 HITL file & terminal mutation tools)
 tools = list(TIER_1_TOOLS) + list(TIER_2_TOOLS)
@@ -45,17 +49,17 @@ def build_personalization_block(
     return "\n\n".join(parts)
 
 
-def chatbot_node(state: AgentState, config: RunnableConfig):
+async def chatbot_node(state: AgentState, config: RunnableConfig):
     """
-    The main reasoning node:
-    - Merges Craft Mode master prompts with active user personalization & memory context from AgentState.
+    Async reasoning node:
+    - Merges Craft Mode master prompts with active user personalization & memory context.
     - Applies a sliding message window to optimize token budget.
-    - Invokes mode-calibrated LLM with graceful fallback.
+    - Binds workspace tools in 'agent' mode and honors cancellation events.
     """
-    configurable = config.get("configurable", {})
-    user_tier = configurable.get("user_tier", "free")
-    model_id = configurable.get("model_id")
-    mode = (configurable.get("mode") or "standard").lower()
+    options = config.get("configurable", {})
+    user_tier = options.get("user_tier", "free")
+    model_id = options.get("model_id")
+    mode = (options.get("mode") or "standard").lower()
 
     base_system_prompt = CRAFT_MODES.get(mode, CRAFT_MODES["standard"])
     personalization_block = build_personalization_block(
@@ -65,47 +69,58 @@ def chatbot_node(state: AgentState, config: RunnableConfig):
     full_system_prompt = base_system_prompt + personalization_block
 
     raw_messages = list(state.get("messages", []))
-    if len(raw_messages) > MAX_CONTEXT_MESSAGES:
-        trimmed_messages = raw_messages[-MAX_CONTEXT_MESSAGES:]
-    else:
-        trimmed_messages = raw_messages
-
+    trimmed_messages = (
+        raw_messages[-MAX_CONTEXT_MESSAGES:]
+        if len(raw_messages) > MAX_CONTEXT_MESSAGES
+        else raw_messages
+    )
     messages = [SystemMessage(content=full_system_prompt)] + trimmed_messages
 
-    llm = get_llm(tier=user_tier, model_id=model_id, mode=mode)
-    llm_with_tools = llm.bind_tools(tools) if (mode == "agent" and tools) else llm
+    timeout_seconds = get_settings().generation_timeout_seconds
+    cancel_event = options.get("cancel_event")
 
-    try:
-        response = llm_with_tools.invoke(messages)
-    except Exception as exc:
-        err_str = str(exc).lower()
-        if "model" in err_str or "not found" in err_str or "decommissioned" in err_str or "connect" in err_str:
-            fallback = LocalCraftLLM(model_name=model_id or "gptcraft", mode=mode)
-            fallback_with_tools = fallback.bind_tools(tools) if (mode == "agent" and tools) else fallback
-            response = fallback_with_tools.invoke(messages)
-        else:
-            raise exc
+    # Request-scoped transport closes sockets even when the graph is cancelled.
+    async with httpx.AsyncClient(timeout=timeout_seconds) as transport:
+        llm = get_llm(
+            tier=user_tier,
+            model_id=model_id,
+            mode=mode,
+            http_async_client=transport,
+        )
+        llm_with_tools = llm.bind_tools(tools) if (mode == "agent" and tools) else llm
+
+        if cancel_event is None:
+            response = await llm_with_tools.ainvoke(messages, config=config)
+            return {"messages": [response]}
+
+        generation = asyncio.create_task(llm_with_tools.ainvoke(messages, config=config))
+        cancelled = asyncio.create_task(cancel_event.wait())
+        try:
+            done, _ = await asyncio.wait(
+                [generation, cancelled],
+                timeout=timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancelled in done:
+                raise asyncio.CancelledError
+            if generation not in done:
+                raise TimeoutError("Generation deadline exceeded")
+            response = generation.result()
+        finally:
+            generation.cancel()
+            cancelled.cancel()
+            await asyncio.gather(generation, cancelled, return_exceptions=True)
 
     return {"messages": [response]}
 
 
-# Define the graph
 graph_builder = StateGraph(AgentState)
-
-# Add nodes
 graph_builder.add_node("chatbot", chatbot_node)
 graph_builder.add_node("tools", ToolNode(tools))
-
-# Set entry point
 graph_builder.set_entry_point("chatbot")
-
-# Add conditional edges
 graph_builder.add_conditional_edges("chatbot", tools_condition)
-
-# Add cyclical edge back to chatbot
 graph_builder.add_edge("tools", "chatbot")
 
-# Compile the agent with in-memory checkpointing for HITL interrupts
 checkpointer = MemorySaver()
 compiled_graph = graph_builder.compile(checkpointer=checkpointer)
 
@@ -130,8 +145,14 @@ class CheckpointedAgentWrapper:
     def invoke(self, input, config=None, **kwargs):
         return self._inner.invoke(input, config=self._ensure_config(config), **kwargs)
 
+    async def ainvoke(self, input, config=None, **kwargs):
+        return await self._inner.ainvoke(input, config=self._ensure_config(config), **kwargs)
+
     def stream(self, input, config=None, **kwargs):
         return self._inner.stream(input, config=self._ensure_config(config), **kwargs)
+
+    def astream(self, input, config=None, **kwargs):
+        return self._inner.astream(input, config=self._ensure_config(config), **kwargs)
 
     def get_state(self, config=None, **kwargs):
         return self._inner.get_state(self._ensure_config(config), **kwargs)

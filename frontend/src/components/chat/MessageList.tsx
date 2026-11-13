@@ -90,7 +90,7 @@ export const MessageList = ({
   isGenerating,
   userName,
   selectedMode = 'standard',
-  selectedModelName = 'Llama 3.3 70B',
+  selectedModelName = 'No model selected',
   onQuickPrompt,
   onApprovalDecision,
 }: MessageListProps) => {
@@ -208,8 +208,8 @@ export const MessageList = ({
               <MessageBubble
                 key={message.id}
                 message={message}
-                modelName={selectedModelName}
-                modeName={selectedMode}
+                modelName={message.modelUsed || 'Model not recorded'}
+                modeName={message.modeUsed || selectedMode}
                 onApprovalDecision={onApprovalDecision}
               />
             ))}

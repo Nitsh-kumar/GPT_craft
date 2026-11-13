@@ -79,7 +79,8 @@ export const MessageBubble = ({
   const hasThoughts = Boolean(message.thoughts && message.thoughts.length > 0);
   const hasActions = Boolean(message.actions && message.actions.length > 0);
   const hasApproval = Boolean(message.approvalRequired);
-  if (!message.content && !hasThoughts && !hasActions && !hasApproval) return null;
+  const isInterrupted = message.status === 'interrupted';
+  if (!message.content && !hasThoughts && !hasActions && !hasApproval && !isInterrupted) return null;
 
   return (
     <div className="group flex w-full animate-in flex-col rounded-xl border border-line bg-surface/60 p-4 sm:p-5 shadow-lift transition-colors hover:border-line-strong">
@@ -192,6 +193,9 @@ export const MessageBubble = ({
         />
       )}
 
+      {message.status === 'interrupted' && (
+        <p className="mb-3 text-xs text-warn" role="status">Generation interrupted — this response is incomplete.</p>
+      )}
       {/* Structured Content Stream */}
       <div className="min-w-0 flex-1">
         <div className="prose-craft">

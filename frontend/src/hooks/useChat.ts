@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { CraftMode, Message, Model } from '../types';
+import { CraftMode, Message, Model, ConversationResponse } from '../types';
 import { chatService } from '../services/chatService';
 
 export const useChat = () => {
@@ -9,9 +9,10 @@ export const useChat = () => {
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [selectedMode, setSelectedMode] = useState<CraftMode>('standard');
-  const [conversations, setConversations] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<ConversationResponse[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   
+  const selectionRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -23,7 +24,7 @@ export const useChat = () => {
           setSelectedModel(availableModels[0].id);
         }
       } catch (err) {
-        console.error('Failed to fetch models', err);
+        setError('Unable to load available models. Please reload to retry.');
       }
     };
     fetchModels();
@@ -43,19 +44,27 @@ export const useChat = () => {
   }, [loadConversations]);
 
   const selectConversation = useCallback(async (id: string | null) => {
+    const selection = ++selectionRef.current;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setError(null);
     setCurrentConversationId(id);
     if (!id) {
       setMessages([]);
+      setIsGenerating(false);
       return;
     }
     setIsGenerating(true);
     try {
       const history = await chatService.getHistory(id);
-      const mapped: Message[] = history.map((msg: any) => ({
+      const mapped: Message[] = history.map((msg) => ({
         id: msg.id.toString(),
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
-        timestamp: msg.created_at
+        timestamp: msg.created_at,
+        modelUsed: msg.model_used || undefined,
+        modeUsed: msg.mode_used || undefined,
+        status: 'complete' as const,
       }));
       try {
         const pending = await chatService.getPendingApproval(id);
@@ -66,12 +75,12 @@ export const useChat = () => {
       } catch (e) {
         console.warn('Failed to load pending approval', e);
       }
-      setMessages(mapped);
+      if (selectionRef.current === selection) setMessages(mapped);
     } catch (err) {
       console.error('Failed to load history', err);
-      setError('Failed to load conversation history');
+      if (selectionRef.current === selection) setError('Failed to load conversation history');
     } finally {
-      setIsGenerating(false);
+      if (selectionRef.current === selection) setIsGenerating(false);
     }
   }, []);
 
@@ -89,7 +98,7 @@ export const useChat = () => {
   }, [currentConversationId]);
 
   const sendMessage = useCallback(async (content: string, modeOverride?: CraftMode) => {
-    if (!content.trim() || !selectedModel) return;
+    if (!content.trim() || !selectedModel || abortControllerRef.current) return;
 
     const activeMode = modeOverride ?? selectedMode;
 
@@ -110,6 +119,9 @@ export const useChat = () => {
       id: assistantMessageId,
       role: 'assistant',
       content: '',
+      status: 'streaming',
+      modelUsed: selectedModel,
+      modeUsed: activeMode,
       timestamp: new Date().toISOString(),
       mode: activeMode,
       thoughts: [],
@@ -118,16 +130,18 @@ export const useChat = () => {
 
     setMessages((prev) => [...prev, newAssistantMessage]);
 
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const history = [...messages, newUserMessage];
-      
+
       const result = await chatService.streamMessage(
         currentConversationId,
         selectedModel,
         history,
         (chunk) => {
+          if (controller.signal.aborted) return;
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId
@@ -136,9 +150,10 @@ export const useChat = () => {
             )
           );
         },
-        abortControllerRef.current.signal,
+        controller.signal,
         activeMode,
         (event) => {
+          if (controller.signal.aborted) return;
           if (event.type === 'thought') {
             setMessages((prev) =>
               prev.map((msg) =>
@@ -213,23 +228,35 @@ export const useChat = () => {
               )
             );
           }
+        },
+        (event) => {
+          if (controller.signal.aborted) return;
+          setCurrentConversationId(String(event.conversation_id));
+          loadConversations();
         }
       );
 
+      if (controller.signal.aborted) return;
+      setMessages(prev => prev.map(msg => msg.id === assistantMessageId
+        ? { ...msg, status: 'complete', modelUsed: result.modelUsed, modeUsed: result.modeUsed } : msg));
       if (!currentConversationId && result.conversationId) {
         setCurrentConversationId(result.conversationId);
         loadConversations();
       }
       
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
+    } catch (err: unknown) {
+      setMessages(prev => prev.map(msg => msg.id === assistantMessageId
+        ? { ...msg, status: 'interrupted' } : msg));
+      if (err instanceof Error && err.name === 'AbortError') {
         console.log('Stream aborted by user');
       } else {
-        setError(err.message || 'An error occurred while generating the response.');
+        setError(err instanceof Error ? err.message : 'Generation failed.');
       }
     } finally {
-      setIsGenerating(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller) {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
     }
   }, [messages, selectedModel, selectedMode, currentConversationId, loadConversations]);
 
@@ -350,11 +377,14 @@ export const useChat = () => {
   );
 
   const clearChat = useCallback(() => {
+    ++selectionRef.current;
     setMessages([]);
     setError(null);
     setCurrentConversationId(null);
     stopGeneration();
   }, [stopGeneration]);
+
+  useEffect(() => () => { abortControllerRef.current?.abort(); }, []);
 
   return {
     messages,

@@ -74,6 +74,9 @@ export interface Message {
   content: string;
   timestamp: string;
   mode?: CraftMode;
+  modelUsed?: string;
+  modeUsed?: CraftMode;
+  status?: 'streaming' | 'complete' | 'interrupted';
   thoughts?: string[];
   actions?: AgentActionTelemetry[];
   approvalRequired?: ApprovalRequiredEnvelope;
@@ -124,4 +127,21 @@ export interface MemoryListResponse {
   memories: UserMemoryItem[];
   total: number;
   memoryEnabled: boolean;
+}
+
+// Existing HTTP history fields remain snake_case for compatibility.
+export interface ConversationResponse {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HistoryMessage {
+  id: number;
+  role: Message['role'];
+  content: string;
+  created_at: string;
+  model_used?: string | null;
+  mode_used?: CraftMode | null;
 }

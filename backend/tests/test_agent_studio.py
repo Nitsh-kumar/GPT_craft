@@ -1,48 +1,10 @@
 import json
-import os
-from unittest.mock import patch
 import pytest
-from fastapi.testclient import TestClient
-
-os.environ["DATABASE_URL"] = "sqlite:///./test_suite.db"
-os.environ["SECRET_KEY"] = "test-secret-key-for-ci-harness"
-os.environ["GROQ_API_KEY"] = "test-groq-api-key"
-
-from app.main import app, seed_default_plan
-from app.core.config import get_settings
-from app.db.base import Base
-from app.db.session import engine
 from app.ai.llm import CRAFT_MODES
 from app.ai.prompts import MODE_TEMPERATURES
 
-client = TestClient(app)
 
-
-@pytest.fixture(autouse=True)
-def reset_db():
-    os.environ["GROQ_API_KEY"] = "test-groq-api-key"
-    get_settings.cache_clear()
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    seed_default_plan()
-    yield
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_sqlite_file():
-    yield
-    engine.dispose()
-    for db_file in ("test_suite.db", "backend/test_suite.db"):
-        if os.path.exists(db_file):
-            try:
-                os.remove(db_file)
-            except OSError:
-                pass
-
-
-def register_user(email="agent@example.com"):
+def register_user(client, email="agent@example.com"):
     res = client.post(
         "/auth/register",
         json={"name": "Agent Tester", "email": email, "password": "password123"},
@@ -79,14 +41,14 @@ def test_craft_modes_includes_agent_studio():
     assert "tier" in prompt
 
 
-def test_chat_endpoint_supports_agent_mode():
-    token = register_user("agent_chat@example.com")
+def test_chat_endpoint_supports_agent_mode(client, agent_provider):
+    token = register_user(client, "agent_chat@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
         "/chat",
         headers=headers,
-        json={"message": "Inspect the codebase structure", "mode": "agent"},
+        json={"message": "Outline the codebase structure", "mode": "agent"},
     )
     assert res.status_code == 200
     data = res.json()
@@ -94,8 +56,8 @@ def test_chat_endpoint_supports_agent_mode():
     assert "Agent Studio" in data["response"]
 
 
-def test_agent_studio_sse_stream_emits_typed_event_envelopes():
-    token = register_user("agent_stream@example.com")
+def test_agent_studio_sse_stream_emits_typed_event_envelopes(client, agent_provider):
+    token = register_user(client, "agent_stream@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
@@ -127,7 +89,7 @@ def test_agent_studio_sse_stream_emits_typed_event_envelopes():
     assert done_data["conversationId"] > 0
     assert done_data["tokensUsed"] > 0
     assert "tokensRemaining" in done_data
-    assert done_data["modelUsed"] == "llama3-8b-8192"
+    assert done_data["modelUsed"] == "openai/gpt-oss-20b"
     assert "conversation_id" not in done_data
 
     hist = client.get(f"/chat/{done_data['conversationId']}/history", headers=headers)
@@ -137,8 +99,8 @@ def test_agent_studio_sse_stream_emits_typed_event_envelopes():
     assert msgs[1]["content"] == assembled
 
 
-def test_conversational_modes_preserve_legacy_sse_chunks():
-    token = register_user("legacy_stream@example.com")
+def test_conversational_modes_preserve_legacy_sse_chunks(client, agent_provider):
+    token = register_user(client, "legacy_stream@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
@@ -156,23 +118,22 @@ def test_conversational_modes_preserve_legacy_sse_chunks():
     assert done_events[0]["data"]["mode_used"] == "standard"
 
 
-def test_agent_studio_stream_error_emits_typed_error_envelope():
-    token = register_user("agent_err@example.com")
+def test_agent_studio_stream_error_emits_typed_error_envelope(client, agent_provider):
+    token = register_user(client, "agent_err@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
-    with patch("app.services.chat.agent.stream") as mock_stream:
-        mock_stream.side_effect = RuntimeError("Simulated Groq failure")
-        res = client.post(
-            "/chat/stream",
-            headers=headers,
-            json={"message": "Run diagnostics", "mode": "agent"},
-        )
+    agent_provider["failure"] = "Simulated Groq failure"
+    res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": "Run diagnostics", "mode": "agent"},
+    )
 
     assert res.status_code == 200
     events = parse_sse_blocks(res.text)
     error_events = [e for e in events if e["event"] == "error"]
     assert len(error_events) == 1
-    assert "Simulated Groq failure" in error_events[0]["data"]["error"]
+    assert error_events[0]["data"]["error"] == "AI generation failed. Please try again."
 
 
 def test_workspace_root_resolution_and_path_safety():
@@ -263,15 +224,16 @@ def test_tier1_tool_output_truncation_to_4000_chars(tmp_path, monkeypatch):
     assert "[Truncated to 4,000 chars]" in result
 
 
-def test_cyclical_react_loop_graph_execution():
+@pytest.mark.anyio
+async def test_cyclical_react_loop_graph_execution(agent_provider):
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from app.ai.graph.agent import agent
 
     # Agent mode invokes Tier 1 tool, enters ToolNode, returns to chatbot, then ENDs
     state = {"messages": [HumanMessage(content="Inspect the workspace files")]}
-    config = {"configurable": {"mode": "agent", "user_tier": "free", "model_id": "llama3-8b-8192"}}
+    config = {"configurable": {"mode": "agent", "user_tier": "free", "model_id": "openai/gpt-oss-20b"}}
 
-    result = agent.invoke(state, config=config)
+    result = await agent.ainvoke(state, config=config)
     messages = result["messages"]
 
     assert len(messages) >= 4
@@ -290,15 +252,15 @@ def test_cyclical_react_loop_graph_execution():
     # Conversational mode does not invoke tools
     std_state = {"messages": [HumanMessage(content="Explain quantum computing")]}
     std_config = {"configurable": {"mode": "standard", "user_tier": "free"}}
-    std_result = agent.invoke(std_state, config=std_config)
+    std_result = await agent.ainvoke(std_state, config=std_config)
     std_messages = std_result["messages"]
     assert len(std_messages) == 2
     assert isinstance(std_messages[1], AIMessage)
     assert not (getattr(std_messages[1], "tool_calls", None))
 
 
-def test_agent_react_loop_emits_action_call_and_action_result_sse_envelopes():
-    token = register_user("react_loop_stream@example.com")
+def test_agent_react_loop_emits_action_call_and_action_result_sse_envelopes(client, agent_provider):
+    token = register_user(client, "react_loop_stream@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
@@ -346,9 +308,9 @@ def test_agent_react_loop_emits_action_call_and_action_result_sse_envelopes():
     assert done_payload["modeUsed"] == "agent"
 
 
-def test_tier2_tool_triggers_interrupt_and_emits_approval_required(tmp_path, monkeypatch):
+def test_tier2_tool_triggers_interrupt_and_emits_approval_required(client, agent_provider, tmp_path, monkeypatch):
     monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
-    token = register_user("tier2_stream@example.com")
+    token = register_user(client, "tier2_stream@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
@@ -386,9 +348,9 @@ def test_tier2_tool_triggers_interrupt_and_emits_approval_required(tmp_path, mon
     assert done_data["actionId"] == appr["actionId"]
 
 
-def test_chat_approval_endpoint_resumes_execution_on_approve(tmp_path, monkeypatch):
+def test_chat_approval_endpoint_resumes_execution_on_approve(client, agent_provider, tmp_path, monkeypatch):
     monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
-    token = register_user("approval_approve@example.com")
+    token = register_user(client, "approval_approve@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     # Trigger interrupt
@@ -428,9 +390,9 @@ def test_chat_approval_endpoint_resumes_execution_on_approve(tmp_path, monkeypat
     assert "Updated content from Agent Studio" in target_file.read_text(encoding="utf-8")
 
 
-def test_chat_approval_endpoint_handles_modify_and_reject_with_feedback(tmp_path, monkeypatch):
+def test_chat_approval_endpoint_handles_modify_and_reject_with_feedback(client, agent_provider, tmp_path, monkeypatch):
     monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
-    token = register_user("approval_modify_reject@example.com")
+    token = register_user(client, "approval_modify_reject@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     # Test Modify decision
@@ -501,9 +463,9 @@ def test_chat_approval_endpoint_handles_modify_and_reject_with_feedback(tmp_path
     assert "Re-planning" in full_text or "acknowledged" in full_text
 
 
-def test_pending_approval_persists_and_restored(tmp_path, monkeypatch):
+def test_pending_approval_persists_and_restored(client, agent_provider, tmp_path, monkeypatch):
     monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
-    token = register_user("persists_approval@example.com")
+    token = register_user(client, "persists_approval@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
@@ -660,9 +622,9 @@ def test_run_terminal_command_hitl_mock_lifecycle():
         assert "Overridden command" in res_mod
 
 
-def test_run_terminal_command_chat_stream_approval_and_resumption():
+def test_run_terminal_command_chat_stream_approval_and_resumption(client, agent_provider):
     import sys
-    token = register_user("terminal_approval@example.com")
+    token = register_user(client, "terminal_approval@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     # Step 1: Request terminal command execution in Agent Studio mode

@@ -1,47 +1,8 @@
-import os
-import json
-from unittest.mock import patch
-import pytest
-from fastapi.testclient import TestClient
-
-os.environ["DATABASE_URL"] = "sqlite:///./test_suite.db"
-os.environ["SECRET_KEY"] = "test-secret-key-for-ci-harness"
-os.environ["GROQ_API_KEY"] = "test-groq-api-key"
-
-from app.main import app, seed_default_plan
-from app.core.config import get_settings
-from app.db.base import Base
-from app.db.session import engine, SessionLocal
+from app.db.session import SessionLocal
 from app.services.memory import MemoryService
 
-client = TestClient(app)
 
-
-@pytest.fixture(autouse=True)
-def reset_db():
-    os.environ["GROQ_API_KEY"] = "test-groq-api-key"
-    get_settings.cache_clear()
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    seed_default_plan()
-    yield
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_sqlite_file():
-    yield
-    engine.dispose()
-    for db_file in ("test_suite.db", "backend/test_suite.db"):
-        if os.path.exists(db_file):
-            try:
-                os.remove(db_file)
-            except OSError:
-                pass
-
-
-def register_user(name="MemUser", email="mem@example.com", password="password123"):
+def register_user(client, name="MemUser", email="mem@example.com", password="password123"):
     res = client.post(
         "/auth/register",
         json={"name": name, "email": email, "password": password},
@@ -51,8 +12,8 @@ def register_user(name="MemUser", email="mem@example.com", password="password123
     return data["accessToken"], data["user"]["id"]
 
 
-def test_preferences_lifecycle_and_camelcase_contract():
-    token, _ = register_user()
+def test_preferences_lifecycle_and_camelcase_contract(client):
+    token, _ = register_user(client)
     headers = {"Authorization": f"Bearer {token}"}
 
     # 1. Fetch default preferences and verify camelCase serialization
@@ -95,8 +56,8 @@ def test_preferences_lifecycle_and_camelcase_contract():
     assert toggle_res.json()["memoryEnabled"] is False
 
 
-def test_memory_crud_and_listing_camelcase():
-    token, _ = register_user()
+def test_memory_crud_and_listing_camelcase(client):
+    token, _ = register_user(client)
     headers = {"Authorization": f"Bearer {token}"}
 
     # 1. Initially empty
@@ -151,8 +112,8 @@ def test_memory_crud_and_listing_camelcase():
     assert list_res3.json()["total"] == 0
 
 
-def test_invalid_memory_category_rejected():
-    token, _ = register_user(email="invalidcat@example.com")
+def test_invalid_memory_category_rejected(client):
+    token, _ = register_user(client, email="invalidcat@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(
@@ -163,10 +124,10 @@ def test_invalid_memory_category_rejected():
     assert res.status_code == 422
 
 
-def test_memory_relevance_ranking():
+def test_memory_relevance_ranking(client):
     db = SessionLocal()
     try:
-        _, user_id = register_user(email="ranking@example.com")
+        _, user_id = register_user(client, email="ranking@example.com")
 
         MemoryService.add_memory(db, user_id, "User works with Python and FastAPI", category="tech_stack")
         MemoryService.add_memory(db, user_id, "User prefers dark roast coffee", category="preference")
@@ -192,8 +153,8 @@ def test_memory_extraction_heuristic():
     assert "tech stack is" in extracted2[0]["content"].lower() or "python" in extracted2[0]["content"].lower()
 
 
-def test_chat_with_memory_injection():
-    token, _ = register_user(email="chatmem@example.com")
+def test_chat_with_memory_injection(client, agent_provider):
+    token, _ = register_user(client, email="chatmem@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     client.put(
@@ -224,14 +185,14 @@ def test_chat_with_memory_injection():
     assert "Full-stack architect with Python expertise" in data["response"]
 
 
-def test_memory_disabled_toggle():
+def test_memory_disabled_toggle(client, agent_provider):
     """
     When memoryEnabled is False:
     1. MemoryService.get_relevant_memories returns []
     2. /chat does NOT inject personalization or memories into the system prompt
     3. /chat does NOT auto-extract new memories from user turns
     """
-    token, user_id = register_user(email="disabledmem@example.com")
+    token, user_id = register_user(client, email="disabledmem@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     # Seed instructions and an existing memory while enabled
@@ -271,19 +232,19 @@ def test_memory_disabled_toggle():
     assert not any("Rust" in m["content"] for m in memories)
 
 
-def test_chat_auto_memory_extraction_and_post_turn_safety():
-    token, _ = register_user(email="autoextract@example.com")
+def test_chat_auto_memory_extraction_and_post_turn_safety(client, agent_provider):
+    token, _ = register_user(client, email="autoextract@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     # 1. If LLM invocation fails mid-turn, post-turn extraction must NOT persist memories
-    with patch("app.services.chat.agent.invoke") as mock_invoke:
-        mock_invoke.side_effect = RuntimeError("Upstream provider failure")
-        fail_res = client.post(
-            "/chat",
-            headers=headers,
-            json={"message": "Please remember that I use Cobol on mainframes"},
-        )
-        assert fail_res.status_code == 500
+    agent_provider["failure"] = "Upstream provider failure"
+    fail_res = client.post(
+        "/chat",
+        headers=headers,
+        json={"message": "Please remember that I use Cobol on mainframes"},
+    )
+    assert fail_res.status_code == 502
+    agent_provider["failure"] = None
 
     assert client.get("/memory", headers=headers).json()["total"] == 0
 
@@ -301,8 +262,8 @@ def test_chat_auto_memory_extraction_and_post_turn_safety():
     assert any("Tailwind v4" in m["content"] for m in memories)
 
 
-def test_streaming_sse_endpoint():
-    token, _ = register_user(email="streamuser@example.com")
+def test_streaming_sse_endpoint(client, agent_provider):
+    token, _ = register_user(client, email="streamuser@example.com")
     headers = {"Authorization": f"Bearer {token}"}
 
     res = client.post(

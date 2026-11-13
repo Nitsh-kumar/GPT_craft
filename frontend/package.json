@@ -10,7 +10,8 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test:unit": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

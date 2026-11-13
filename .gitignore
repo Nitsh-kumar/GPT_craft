@@ -38,3 +38,6 @@ docs/screenshots/**/*.jpg
 docs/screenshots/**/*.jpeg
 docs/screenshots/**/*.gif
 docs/screenshots/**/*.svg
+
+# Generated Vercel CDN assets
+/public/

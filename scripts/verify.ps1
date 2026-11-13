@@ -42,8 +42,15 @@ try {
     }
     Write-Host "✅ Frontend TypeScript check passed!" -ForegroundColor Green
 
-    # 4. Frontend Production Build
-    Write-Host "`n[4/4] Running Frontend Production Build (npm run build)..." -ForegroundColor Yellow
+    # 4. Frontend Stream Tests & Production Build
+    Write-Host "`n[4/5] Running Frontend Stream Tests (npm test)..." -ForegroundColor Yellow
+    npm test
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend stream tests failed with exit code $LASTEXITCODE"
+    }
+    Write-Host "✅ Frontend stream tests passed!" -ForegroundColor Green
+
+    Write-Host "`n[5/5] Running Frontend Production Build (npm run build)..." -ForegroundColor Yellow
     npm run build
     if ($LASTEXITCODE -ne 0) {
         throw "Frontend Vite build failed with exit code $LASTEXITCODE"

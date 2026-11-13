@@ -21,6 +21,14 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "/memory",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/memory/(.*)",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(health|docs|openapi.json)",
       "dest": "/api/index.py"
     },

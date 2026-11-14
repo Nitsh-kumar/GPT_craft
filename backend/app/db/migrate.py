@@ -4,7 +4,7 @@ Run with application traffic stopped: python -m app.db.migrate
 No quota is reset on subsequent runs. Legacy tables are retained for rollback.
 """
 from datetime import datetime, time, timedelta
-from sqlalchemy import DDL, func, select
+from sqlalchemy import DDL, func, inspect, select, text
 from app.ai.llm import PLAN_QUOTAS
 from app.db.base import Base
 from app.db.models import (
@@ -41,6 +41,11 @@ RLS_PROTECTED_MODELS = (
 
 def migrate(bind=engine):
     Base.metadata.create_all(bind)
+    inspector = inspect(bind)
+    approval_columns = {col["name"] for col in inspector.get_columns("agent_approvals")}
+    if "model_used" not in approval_columns:
+        with bind.begin() as conn:
+            conn.execute(text("ALTER TABLE agent_approvals ADD COLUMN model_used VARCHAR"))
     with SessionLocal(bind=bind) as db:
         if bind.dialect.name == 'postgresql':
             # These tables are internal to the privileged backend, never browser

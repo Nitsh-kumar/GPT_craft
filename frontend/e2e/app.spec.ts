@@ -40,6 +40,7 @@ test('premature EOF displays an error and marks partial text incomplete', async 
 
 test('subscription controls cannot grant paid entitlements', async ({ page }) => {
   await page.goto('/subscription');
+  await expect(page.getByTestId('plan-card-free')).toContainText('All 5 Craft Modes');
   await expect(page.getByTestId('select-plan-super')).toBeDisabled();
   await expect(page.getByTestId('select-plan-hyper')).toBeDisabled();
   await expect(page.getByText('Paid plan changes are not available yet.', { exact:false })).toBeVisible();
@@ -81,4 +82,83 @@ test('agent studio displays telemetry drawer, diff inspector, and resumes after 
   await page.getByTestId('approval-approve-btn').click();
   await expect(page.getByText('Applied your approved update to README.md.')).toBeVisible();
   await expect(page.getByTestId('approval-card')).toBeHidden();
+});
+
+test('pre-stream approval failure preserves approval card and allows retry', async ({ page }) => {
+  await page.route('**/chat/stream', route => route.fulfill({ contentType:'text/event-stream', body:
+    'event: approval_required\ndata: {"actionId":"act_retry","tool":"edit_workspace_file","tier":2,"parameters":{"path":"README.md","content":"Retry"},"rationale":"Retry update","diff":"--- a/README.md\\n+++ b/README.md\\n@@ -1,1 +1,2 @@\\n # GPTCraft\\n+Retry"}\n\n' +
+    'event: done\ndata: {"status":"interrupted","conversationId":"1","modelUsed":"openai/gpt-oss-20b","modeUsed":"agent"}\n\n'
+  }));
+
+  let attempts = 0;
+  await page.route('**/chat/approval', async route => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'Temporary approval error' }) });
+      return;
+    }
+    await route.fulfill({ contentType:'text/event-stream', body:
+      'event: action_result\ndata: {"actionId":"act_retry","tool":"edit_workspace_file","output":"Updated README.md"}\n\n' +
+      'event: token\ndata: {"token":"Recovered after retry."}\n\n' +
+      'event: done\ndata: {"status":"completed","conversationId":"1","modelUsed":"openai/gpt-oss-20b","modeUsed":"agent","tokensUsed":55,"tokensRemaining":4945}\n\n'
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByTestId('craft-mode-agent').click();
+  await page.getByTestId('chat-input').fill('Update README.md');
+  await page.getByTestId('send-button').click();
+
+  await expect(page.getByTestId('approval-card')).toBeVisible();
+  await page.getByTestId('approval-approve-btn').click();
+
+  await expect(page.getByTestId('chat-error-banner')).toContainText('Temporary approval error');
+  await expect(page.getByText('Generation interrupted — this response is incomplete.')).toBeVisible();
+  await expect(page.getByTestId('approval-card')).toBeVisible();
+
+  await page.getByTestId('approval-approve-btn').click();
+  await expect(page.getByText('Recovered after retry.')).toBeVisible();
+  await expect(page.getByTestId('approval-card')).toBeHidden();
+});
+
+test('approval premature EOF marks response interrupted and 401 triggers unauthorized logout', async ({ page }) => {
+  await page.route('**/chat/stream', route => route.fulfill({ contentType:'text/event-stream', body:
+    'event: approval_required\ndata: {"actionId":"act_eof","tool":"edit_workspace_file","tier":2,"parameters":{"path":"README.md","content":"EOF"},"rationale":"Test EOF"}\n\n' +
+    'event: done\ndata: {"status":"interrupted","conversationId":"1","modelUsed":"openai/gpt-oss-20b","modeUsed":"agent"}\n\n'
+  }));
+
+  await page.route('**/chat/approval', route => route.fulfill({ contentType:'text/event-stream', body:
+    'event: token\ndata: {"token":"Partial approval output"}\n\n'
+  }));
+
+  await page.goto('/chat');
+  await page.getByTestId('craft-mode-agent').click();
+  await page.getByTestId('chat-input').fill('Test EOF on approval');
+  await page.getByTestId('send-button').click();
+
+  await expect(page.getByTestId('approval-card')).toBeVisible();
+  await page.getByTestId('approval-approve-btn').click();
+
+  await expect(page.getByTestId('chat-error-banner')).toContainText('interrupted');
+  await expect(page.getByText('Generation interrupted — this response is incomplete.')).toBeVisible();
+
+  // Now verify 401 on approval dispatches auth:unauthorized and redirects to /login
+  await page.route('**/chat/stream', route => route.fulfill({ contentType:'text/event-stream', body:
+    'event: approval_required\ndata: {"actionId":"act_401","tool":"edit_workspace_file","tier":2,"parameters":{"path":"README.md","content":"401"},"rationale":"Test 401"}\n\n' +
+    'event: done\ndata: {"status":"interrupted","conversationId":"1","modelUsed":"openai/gpt-oss-20b","modeUsed":"agent"}\n\n'
+  }));
+  await page.route('**/chat/approval', route => route.fulfill({
+    status: 401,
+    contentType: 'application/json',
+    body: JSON.stringify({ detail: 'Token expired' }),
+  }));
+
+  await page.goto('/chat');
+  await page.getByTestId('craft-mode-agent').click();
+  await page.getByTestId('chat-input').fill('Test 401 on approval');
+  await page.getByTestId('send-button').click();
+
+  await expect(page.getByTestId('approval-card')).toBeVisible();
+  await page.getByTestId('approval-approve-btn').click();
+  await page.waitForURL('**/login');
 });

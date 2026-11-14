@@ -683,6 +683,131 @@ def test_run_terminal_command_chat_stream_approval_and_resumption(client, agent_
     assert done_ev["status"] == "completed"
 
 
+@pytest.mark.parametrize("decision", ["approve", "modify", "reject"])
+def test_chat_approval_preserves_original_model_on_resume(client, agent_provider, tmp_path, monkeypatch, decision):
+    from app.db.models import AgentApproval, User
+    from app.db.session import SessionLocal
+
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    res_reg = client.post(
+        "/auth/register",
+        json={"name": "Hyper Tester", "email": f"hyper_{decision}@example.com", "password": "password123"},
+    )
+    assert res_reg.status_code == 201
+    user_data = res_reg.json()
+    headers = {"Authorization": f"Bearer {user_data['accessToken']}"}
+
+    with SessionLocal() as db:
+        db.get(User, user_data["user"]["id"]).plan_id = 3
+        db.commit()
+
+    stream_res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={
+            "message": "Write docs/hyper_test.txt",
+            "model": "openai/gpt-oss-120b",
+            "mode": "agent",
+        },
+    )
+    assert stream_res.status_code == 200
+    events = parse_sse_blocks(stream_res.text)
+    appr = [e["data"] for e in events if e["event"] == "approval_required"][0]
+    done_interrupt = [e["data"] for e in events if e["event"] == "done"][0]
+    assert done_interrupt["modelUsed"] == "openai/gpt-oss-120b"
+    conv_id = done_interrupt["conversationId"]
+    action_id = appr["actionId"]
+
+    with SessionLocal() as db:
+        row = db.get(AgentApproval, action_id)
+        assert row is not None
+        assert row.model_used == "openai/gpt-oss-120b"
+
+    payload = {"actionId": action_id, "decision": decision}
+    if decision == "modify":
+        payload["modifiedParams"] = {
+            "path": "docs/hyper_modified.txt",
+            "content": "Modified content on hyper tier",
+            "mode": "write",
+        }
+    elif decision == "reject":
+        payload["feedback"] = "Skip editing this file."
+
+    resume_res = client.post("/chat/approval", headers=headers, json=payload)
+    assert resume_res.status_code == 200
+    resume_events = parse_sse_blocks(resume_res.text)
+    resume_done = [e["data"] for e in resume_events if e["event"] == "done"][0]
+    assert resume_done["status"] == "completed"
+    assert resume_done["modelUsed"] == "openai/gpt-oss-120b"
+
+    assembled = "".join(e["data"]["token"] for e in resume_events if e["event"] == "token")
+    assert "openai/gpt-oss-120b" in assembled
+
+    history = client.get(f"/chat/{conv_id}/history", headers=headers).json()
+    assistant_msgs = [m for m in history if m["role"] == "assistant"]
+    assert len(assistant_msgs) == 1
+    assert assistant_msgs[0]["model_used"] == "openai/gpt-oss-120b"
 
 
+def test_chat_approval_reserves_quota_using_checkpointed_message_bound(client, agent_provider, tmp_path, monkeypatch):
+    from app.core.config import get_settings
+    from app.db.crud_token import utc_now
+    from app.db.models import AgentApproval, DailyQuota
+    from app.db.session import SessionLocal
+
+    monkeypatch.setenv("GPTCRAFT_WORKSPACE_ROOT", str(tmp_path))
+    res_reg = client.post(
+        "/auth/register",
+        json={"name": "Quota Bound Tester", "email": "approval_quota@example.com", "password": "password123"},
+    )
+    assert res_reg.status_code == 201
+    user_data = res_reg.json()
+    headers = {"Authorization": f"Bearer {user_data['accessToken']}"}
+
+    # Long prompt makes the checkpointed conversation bound well above max_output_tokens + 256 (1280)
+    long_prompt = "Edit docs/quota_test.txt " + ("context " * 300)
+    stream_res = client.post(
+        "/chat/stream",
+        headers=headers,
+        json={"message": long_prompt, "mode": "agent"},
+    )
+    assert stream_res.status_code == 200
+    events = parse_sse_blocks(stream_res.text)
+    action_id = [e["data"] for e in events if e["event"] == "approval_required"][0]["actionId"]
+
+    # Set remaining tokens above the old fixed offset (1280) but below the checkpointed conversation bound (~4300+)
+    fixed_legacy_estimate = get_settings().max_output_tokens + 256
+    with SessionLocal() as db:
+        quota = db.get(DailyQuota, (user_data["user"]["id"], utc_now().date()))
+        quota.tokens_remaining = fixed_legacy_estimate + 500
+        db.commit()
+
+    rejected_res = client.post(
+        "/chat/approval",
+        headers=headers,
+        json={"actionId": action_id, "decision": "approve"},
+    )
+    assert rejected_res.status_code == 402
+    assert "Insufficient token quota" in rejected_res.json()["detail"]
+
+    # Pending approval must remain pending when quota reservation rejects
+    with SessionLocal() as db:
+        row = db.get(AgentApproval, action_id)
+        assert row is not None
+        assert row.status == "pending"
+
+    # Once sufficient quota is available, approval resumption succeeds
+    with SessionLocal() as db:
+        quota = db.get(DailyQuota, (user_data["user"]["id"], utc_now().date()))
+        quota.tokens_remaining = 5000
+        db.commit()
+
+    ok_res = client.post(
+        "/chat/approval",
+        headers=headers,
+        json={"actionId": action_id, "decision": "approve"},
+    )
+    assert ok_res.status_code == 200
+    ok_events = parse_sse_blocks(ok_res.text)
+    assert [e["data"] for e in ok_events if e["event"] == "done"][0]["status"] == "completed"
 

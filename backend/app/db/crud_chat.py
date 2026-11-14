@@ -59,6 +59,7 @@ class ChatCRUD:
         parameters: Any,
         rationale: str,
         diff: Optional[str] = None,
+        model_used: Optional[str] = None,
     ) -> AgentApproval:
         params_str = json.dumps(parameters) if isinstance(parameters, (dict, list)) else str(parameters)
         approval = db.query(AgentApproval).filter(AgentApproval.id == action_id).first()
@@ -72,6 +73,7 @@ class ChatCRUD:
                 parameters=params_str,
                 rationale=rationale,
                 diff=diff,
+                model_used=model_used,
                 status="pending",
             )
             db.add(approval)
@@ -83,6 +85,7 @@ class ChatCRUD:
             approval.parameters = params_str
             approval.rationale = rationale
             approval.diff = diff
+            approval.model_used = model_used
             approval.status = "pending"
         db.commit()
         db.refresh(approval)

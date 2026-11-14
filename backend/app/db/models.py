@@ -177,6 +177,7 @@ class AgentApproval(Base):
     parameters = Column(Text, nullable=False)
     rationale = Column(Text, nullable=False)
     diff = Column(Text, nullable=True)
+    model_used = Column(String, nullable=True)
     status = Column(String, default="pending", nullable=False)
     user_feedback = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

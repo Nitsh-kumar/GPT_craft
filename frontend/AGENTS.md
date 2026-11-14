@@ -15,3 +15,6 @@
 3. **Component Architecture**:
    - Keep page components (`src/pages/`) thin; delegate state management to hooks (`src/hooks/`) and reusable UI primitives (`src/components/`).
    - Handle loading, empty, error, and abort (`AbortController`) states gracefully in all chat and quota interactions.
+4. **Agent Studio & SSE Envelope Parsing**:
+   - All streaming responses must be parsed through `src/utils/sseParser.ts` (`parseSseBuffer`), which normalizes both typed Agent Studio envelopes (`thought`, `action_call`, `approval_required`, `action_result`, `token`, `done`) and legacy conversational frames.
+   - Always run `npm run test:unit` and `npm run lint` after modifying streaming parsers, hooks, or Agent Studio components.

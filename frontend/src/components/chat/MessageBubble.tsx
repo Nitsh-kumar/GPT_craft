@@ -1,31 +1,53 @@
 import React, { useState } from 'react';
 import { Message, CraftMode } from '../../types';
 import { cn } from '../../utils/cn';
-import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb } from 'lucide-react';
+import { Copy, Check, Terminal, Sparkles, Compass, Code2, Lightbulb, Bot } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ApprovalCard } from './ApprovalCard';
+import { TelemetryDrawer } from './TelemetryDrawer';
 
 interface MessageBubbleProps {
   message: Message;
   modelName?: string;
   modeName?: CraftMode;
+  isStreaming?: boolean;
+  onApprovalDecision?: (
+    actionId: string,
+    decision: 'approve' | 'modify' | 'reject',
+    modifiedParams?: Record<string, unknown>,
+    feedback?: string
+  ) => void;
 }
 
 const getModeMeta = (mode?: CraftMode) => {
   switch (mode) {
+    case 'agent':
+      return {
+        label: 'Agent Studio',
+        badge: 'AGENT',
+        icon: <Bot size={12} className="text-accent" />,
+        pillClass: 'border-accent/35 bg-accent-soft text-accent',
+      };
     case 'architect':
-      return { label: 'Deep Architect', icon: <Compass size={12} className="text-blue-500" /> };
+      return { label: 'Deep Architect', icon: <Compass size={12} className="text-blue-500" />, pillClass: 'border-line bg-raised text-ink-3' };
     case 'code':
-      return { label: 'Code Craft', icon: <Code2 size={12} className="text-emerald-500" /> };
+      return { label: 'Code Craft', icon: <Code2 size={12} className="text-emerald-500" />, pillClass: 'border-line bg-raised text-ink-3' };
     case 'brainstorm':
-      return { label: 'Brainstorm', icon: <Lightbulb size={12} className="text-amber-500" /> };
+      return { label: 'Brainstorm', icon: <Lightbulb size={12} className="text-amber-500" />, pillClass: 'border-line bg-raised text-ink-3' };
     case 'standard':
     default:
-      return { label: 'Standard Craft', icon: <Sparkles size={12} className="text-accent" /> };
+      return { label: 'Standard Craft', icon: <Sparkles size={12} className="text-accent" />, pillClass: 'border-line bg-raised text-ink-3' };
   }
 };
 
-export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName = 'standard' }: MessageBubbleProps) => {
+export const MessageBubble = ({
+  message,
+  modelName = 'GPTCraft Engine',
+  modeName = 'standard',
+  isStreaming = false,
+  onApprovalDecision,
+}: MessageBubbleProps) => {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
 
@@ -36,7 +58,8 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
   };
 
   const time = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const modeMeta = getModeMeta(modeName);
+  const effectiveMode = message.mode || modeName;
+  const modeMeta = getModeMeta(effectiveMode);
 
   if (isUser) {
     return (
@@ -56,7 +79,11 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
     );
   }
 
-  if (!message.content) return null;
+  const hasThoughts = Boolean(message.thoughts && message.thoughts.length > 0);
+  const hasActions = Boolean(message.actions && message.actions.length > 0);
+  const hasApproval = Boolean(message.approvalRequired);
+  const isInterrupted = message.status === 'interrupted';
+  if (!message.content && !hasThoughts && !hasActions && !hasApproval && !isInterrupted) return null;
 
   return (
     <div className="group flex w-full animate-in flex-col rounded-xl border border-line bg-surface/60 p-4 sm:p-5 shadow-lift transition-colors hover:border-line-strong">
@@ -72,9 +99,17 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
             <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-sunken border border-line text-ink-2">
               {modelName}
             </span>
-            <span className="inline-flex items-center gap-1 text-[11px] text-ink-3 font-medium px-1.5 py-0.5 rounded border border-line bg-raised">
+            <span
+              data-testid="message-mode-badge"
+              className={cn('inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded border', modeMeta.pillClass)}
+            >
               {modeMeta.icon}
               <span>{modeMeta.label}</span>
+              {modeMeta.badge && (
+                <span className="rounded bg-accent text-on-accent px-1 py-px font-mono text-[9px] font-semibold tracking-wider">
+                  {modeMeta.badge}
+                </span>
+              )}
             </span>
           </div>
         </div>
@@ -96,6 +131,28 @@ export const MessageBubble = ({ message, modelName = 'GPTCraft Engine', modeName
         </div>
       </div>
 
+      {/* Agent Telemetry Drawer (Thoughts & Workspace Tool Executions) */}
+      {(hasThoughts || hasActions) && (
+        <TelemetryDrawer
+          thoughts={message.thoughts}
+          actions={message.actions}
+          isStreaming={isStreaming}
+          defaultExpanded={isStreaming}
+          className="mb-3"
+        />
+      )}
+
+      {/* Human-In-The-Loop Approval Card */}
+      {message.approvalRequired && (
+        <ApprovalCard
+          approval={message.approvalRequired}
+          onDecision={onApprovalDecision || (() => {})}
+        />
+      )}
+
+      {message.status === 'interrupted' && (
+        <p className="mb-3 text-xs text-warn" role="status">Generation interrupted — this response is incomplete.</p>
+      )}
       {/* Structured Content Stream */}
       <div className="min-w-0 flex-1">
         <div className="prose-craft">

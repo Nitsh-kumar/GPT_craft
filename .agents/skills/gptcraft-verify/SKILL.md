@@ -2,7 +2,7 @@
 name: gptcraft-verify
 description: >-
   Run the full-stack verification suite for the GPTCraft monorepo (backend pytest
-  tests, frontend TypeScript type-checking, and frontend production Vite build).
+  tests, frontend unit tests, frontend TypeScript type-checking, and frontend production Vite build).
   Use this skill before completing any feature, bugfix, or refactor, or when the
   user asks to test, validate, or check the health of the project.
 ---
@@ -30,10 +30,11 @@ cd backend
 ```
 
 ### 2. Frontend Verification (`frontend/`)
-Run the TypeScript compiler check (`lint`) and Vite production build:
+Run the unit test suite, TypeScript compiler check (`lint`), and Vite production build:
 
 ```powershell
 cd frontend
+npm run test:unit
 npm run lint
 npm run build
 ```

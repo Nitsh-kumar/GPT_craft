@@ -1,31 +1,27 @@
-$ErrorActionPreference = "SilentlyContinue"
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$branch = (git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null)
-if (-not $branch) { $branch = "unknown" }
-
-$msg = "GPTCraft Monorepo Harness Active (branch: $branch). Structure: backend/ (FastAPI + LangGraph) and frontend/ (React 19 + Vite). Use 'scripts/verify.ps1' or the 'gptcraft-verify' skill to validate full-stack changes."
-
-try {
-  $rawMem = mem0 --json list 2>$null
-  if ($rawMem) {
-    $parsed = ($rawMem | ConvertFrom-Json)
-    if ($parsed.status -eq "success" -and $parsed.data -and $parsed.data.Count -gt 0) {
-      $facts = ($parsed.data | Select-Object -First 5 | ForEach-Object { "- $($_.memory)" }) -join "`n"
-      $msg += "`n`nActive Mem0 Long-Term Memories (user: $($parsed.scope.user_id)):`n$facts"
+$ErrorActionPreference = 'Stop'
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$branch = (& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null)
+if (-not $branch) { $branch = 'unknown' }
+$memoryStatus = 'unavailable (manual helper remains available)'
+. (Join-Path $PSScriptRoot 'memory_status.ps1')
+$job = $null
+if (Get-Command mem0 -ErrorAction SilentlyContinue) {
+    try {
+        # Bound memory lookup independently of the hook's overall timeout.
+        $job = Start-Job -ScriptBlock {
+            $output = mem0 --json search 'GPTCraft' 2>$null
+            @{ code = $LASTEXITCODE; raw = ($output -join "`n") }
+        }
+        $finished = Wait-Job $job -Timeout 3
+        if ($finished) {
+            $result = Receive-Job $job -ErrorAction Stop
+            $memoryStatus = ConvertTo-ProjectMemoryStatus -Raw $result.raw -ExitCode $result.code
+        } else { $memoryStatus = 'lookup timed out (continuing without memory)' }
+    } catch { $memoryStatus = 'lookup failed (continuing without memory)' }
+    finally {
+        if ($job) { Stop-Job $job -ErrorAction SilentlyContinue; Remove-Job $job -Force -ErrorAction SilentlyContinue }
     }
-  }
-} catch {
-  # Non-blocking graceful degradation
 }
-
-$payload = @{
-  injectSteps = @(
-    @{
-      systemMessage = @{
-        systemMessage = $msg
-      }
-    }
-  )
-} | ConvertTo-Json -Depth 5 -Compress
-
-Write-Output $payload
+$msg = "GPTCraft harness active. Repository: $repoRoot; branch: $branch. Backend: backend/; frontend: frontend/. Run scripts/verify.ps1 before completion. Memory: $memoryStatus."
+@{ injectSteps = @(@{ systemMessage = @{ systemMessage = $msg } }) } |
+    ConvertTo-Json -Depth 5 -Compress

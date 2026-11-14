@@ -30,9 +30,10 @@ GPT_craft/
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-dev.lock
 Copy-Item .env.example .env
-# Edit .env with your GROQ_API_KEY and SECRET_KEY
+# Edit .env with your DATABASE_URL, GROQ_API_KEY and SECRET_KEY
+.\.venv\Scripts\python.exe -m app.db.migrate
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -43,7 +44,7 @@ Interactive API docs are available at `http://localhost:8000/docs`.
 
 ```powershell
 cd frontend
-npm install
+npm ci
 Copy-Item .env.example .env
 npm run dev
 ```
@@ -91,3 +92,14 @@ After deployment, check `/` and `/login` return HTML, `/health` returns JSON,
 `/chat/models` returns the model catalog, and unauthenticated POST `/chat` is
 rejected by authentication rather than serving HTML. Finish with a real
 sign-in and chat request to verify database and provider credentials.
+
+## Reliability and release status
+
+Use Python 3.12 and Node 24. Public paid Plan changes are disabled until verified
+billing exists. Models are identified by their actual provider IDs; provider
+errors are never replaced with canned success text. Accounting and streaming
+policies, maintenance-window migration, CI checks, dependency updates, and release
+smoke checks are documented in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for implemented versus planned
+capabilities. Apply the migration **before** promoting this release; application
+startup no longer creates schema automatically.

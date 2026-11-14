@@ -1,6 +1,7 @@
-from typing import List, Optional
+import json
+from typing import List, Optional, Any
 from sqlalchemy.orm import Session
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, Message, AgentApproval
 
 class ChatCRUD:
     @staticmethod
@@ -46,4 +47,76 @@ class ChatCRUD:
         db.delete(conv)
         db.commit()
         return True
+
+    @staticmethod
+    def create_or_update_approval(
+        db: Session,
+        action_id: str,
+        conversation_id: int,
+        user_id: int,
+        tool_name: str,
+        tier: int,
+        parameters: Any,
+        rationale: str,
+        diff: Optional[str] = None,
+    ) -> AgentApproval:
+        params_str = json.dumps(parameters) if isinstance(parameters, (dict, list)) else str(parameters)
+        approval = db.query(AgentApproval).filter(AgentApproval.id == action_id).first()
+        if not approval:
+            approval = AgentApproval(
+                id=action_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                tool_name=tool_name,
+                tier=tier,
+                parameters=params_str,
+                rationale=rationale,
+                diff=diff,
+                status="pending",
+            )
+            db.add(approval)
+        else:
+            approval.conversation_id = conversation_id
+            approval.user_id = user_id
+            approval.tool_name = tool_name
+            approval.tier = tier
+            approval.parameters = params_str
+            approval.rationale = rationale
+            approval.diff = diff
+            approval.status = "pending"
+        db.commit()
+        db.refresh(approval)
+        return approval
+
+    @staticmethod
+    def get_pending_approval(db: Session, conversation_id: int, user_id: int) -> Optional[AgentApproval]:
+        return db.query(AgentApproval).filter(
+            AgentApproval.conversation_id == conversation_id,
+            AgentApproval.user_id == user_id,
+            AgentApproval.status == "pending",
+        ).order_by(AgentApproval.created_at.desc()).first()
+
+    @staticmethod
+    def get_approval_by_id(db: Session, action_id: str, user_id: Optional[int] = None) -> Optional[AgentApproval]:
+        query = db.query(AgentApproval).filter(AgentApproval.id == action_id)
+        if user_id is not None:
+            query = query.filter(AgentApproval.user_id == user_id)
+        return query.first()
+
+    @staticmethod
+    def resolve_approval(
+        db: Session,
+        action_id: str,
+        decision: str,
+        feedback: Optional[str] = None,
+    ) -> Optional[AgentApproval]:
+        approval = db.query(AgentApproval).filter(AgentApproval.id == action_id).first()
+        if not approval:
+            return None
+        approval.status = decision
+        if feedback is not None:
+            approval.user_feedback = feedback
+        db.commit()
+        db.refresh(approval)
+        return approval
 

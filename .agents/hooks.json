@@ -4,7 +4,7 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/session_start.ps1",
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$root = git rev-parse --show-toplevel; if ($LASTEXITCODE -ne 0) { exit 1 }; & (Join-Path $root '.agents/scripts/session_start.ps1')\"",
         "timeout": 10
       }
     ]

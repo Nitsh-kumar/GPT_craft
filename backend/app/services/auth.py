@@ -143,36 +143,9 @@ class AuthService:
 
     @staticmethod
     def upgrade_plan(user_id: int, plan_name: str, db: Session) -> UserResponse:
-        normalized = plan_name.strip().lower()
-        if normalized not in ("free", "super", "hyper"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid plan. Choose from: free, super, hyper"
-            )
-
-        plan_obj = db.query(Plans).filter(Plans.name == normalized).first()
-        if not plan_obj:
-            plan_map = {"free": (1, 0), "super": (2, 15), "hyper": (3, 39)}
-            pid, price = plan_map[normalized]
-            plan_obj = Plans(id=pid, name=normalized, price=price, description=f"{normalized.capitalize()} plan")
-            db.add(plan_obj)
-            db.flush()
-
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        user.plan_id = plan_obj.id
-        db.commit()
-        db.refresh(user)
-
-        # Update daily token limit to match the new tier's allowance
-        new_token_limit = PLAN_QUOTAS[normalized]["tokens"]
-        user_limit = TokenUsageCRUD.get_user_limit(db, user.id)
-        if user_limit:
-            user_limit.daily_limit = new_token_limit
-            db.commit()
-        else:
-            TokenUsageCRUD.create_user_limit(db, user.id, initial_limit=new_token_limit)
-
-        return AuthService._user_to_response(user)
+        # Entitlements must come from verified billing or an administrator, never
+        # a user-supplied plan name. Keep the endpoint closed until billing exists.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Plan changes are currently unavailable. Your current plan is unchanged.",
+        )

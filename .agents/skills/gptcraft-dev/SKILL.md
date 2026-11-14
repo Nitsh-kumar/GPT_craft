@@ -58,6 +58,8 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 4. **Frontend Sync (`frontend/src/`)**:
    - Mirror schema updates in `frontend/src/types/index.ts`.
    - Update API calls in `frontend/src/services/chatService.ts` or `authService.ts`.
+   - Route streaming responses through `src/utils/sseParser.ts` (`parseSseBuffer`) to handle both typed Agent Studio envelopes and conversational frames.
    - Update hooks (`useChat.ts`, `useQuota.ts`) and UI components (`src/components/`).
 5. **Verify**:
-   - Run `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1`.
+   - Run frontend unit tests (`cd frontend; npm run test:unit`) and TypeScript checks (`npm run lint`).
+   - Run full-stack verification: `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1`.

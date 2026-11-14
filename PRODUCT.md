@@ -10,7 +10,7 @@ web
 
 - Frontend: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide React, React Router 7
 - Backend: FastAPI, LangGraph, SQLAlchemy, Pydantic v2
-- AI Provider: Groq (Llama 3 8B, Gemma 2 9B, Mixtral 8x7B, Llama 3.3 70B)
+- AI Provider: Groq (GPT-OSS 20B and GPT-OSS 120B)
 - Auth / DB: Supabase (PostgreSQL, Google OAuth + PKCE, email/password)
 
 ## Audience
@@ -21,7 +21,9 @@ Everyday power users, writers, engineers, and researchers seeking a calm, focuse
 
 - Multi-turn conversational reasoning with streaming SSE responses
 - Specialized Craft Modes: Standard, Deep Architect, Code Craft, Brainstorm
-- Tiered model access (Free, Super, Hyper) with real-time token and request quota enforcement
+- Tiered model access (Free, Super, Hyper) with database-backed token reservations and request admission
 - Persistent conversation history with switching and deletion
 - Dual-theme system (Light / Dark / System) with view transition ink-spread reveal
 - Google OAuth and Email/Password authentication
+
+Paid Plan changes are disabled pending billing. See `docs/PROJECT_STATUS.md` for verification scope and the separately tracked Agent Studio roadmap.

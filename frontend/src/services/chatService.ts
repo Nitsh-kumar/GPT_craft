@@ -1,86 +1,59 @@
-/// <reference types="vite/client" />
-
 import { apiFetch, getAuthToken } from './api';
-import { CraftMode, Message, Quota, Model } from '../types';
+import {
+  CraftMode,
+  Message,
+  Quota,
+  Model,
+  SseEventEnvelope,
+  ApprovalRequiredEnvelope,
+  ConversationResponse,
+  HistoryMessage,
+} from '../types';
+import { parseSseBuffer } from '../utils/sseParser';
+import { readChatStream } from './stream';
+import type { StreamStart } from './stream';
 
 export const chatService = {
-  getModels: async (): Promise<Model[]> => {
+  getModels: (): Promise<Model[]> => apiFetch<Model[]>('/chat/models'),
+  getQuota: (): Promise<Quota> => apiFetch<Quota>('/chat/quota'),
+  getConversations: (): Promise<ConversationResponse[]> => apiFetch<ConversationResponse[]>('/chat/conversations'),
+  getHistory: (id: string): Promise<HistoryMessage[]> => apiFetch<HistoryMessage[]>(`/chat/${id}/history`),
+  deleteConversation: async (id: string): Promise<void> => { await apiFetch<void>(`/chat/${id}`, { method: 'DELETE' }); },
+
+  getPendingApproval: async (conversationId: string): Promise<ApprovalRequiredEnvelope | null> => {
     try {
-      return await apiFetch<Model[]>('/chat/models');
+      return await apiFetch<ApprovalRequiredEnvelope | null>(`/chat/${conversationId}/approval`);
     } catch {
-      return [
-        {
-          id: 'llama3-8b-8192',
-          name: 'Llama 3 8B',
-          description: 'Fast, efficient, and versatile for daily tasks.',
-          requiredPlan: 'free',
-        },
-        {
-          id: 'gemma-7b-it',
-          name: 'Gemma 2 9B',
-          description: 'Google-grade lightweight model optimization.',
-          requiredPlan: 'free',
-        },
-        {
-          id: 'mixtral-8x7b-32768',
-          name: 'Mixtral 8x7B',
-          description: 'Powerful mixture of experts for complex reasoning.',
-          requiredPlan: 'super',
-        },
-        {
-          id: 'llama3-70b-8192',
-          name: 'Llama 3.3 70B',
-          description: "Groq's most capable reasoning and coding model.",
-          requiredPlan: 'hyper',
-        },
-      ];
+      return null;
     }
   },
 
-  getQuota: async (): Promise<Quota> => {
-    return apiFetch<Quota>('/chat/quota');
-  },
-
-  getConversations: async (): Promise<any[]> => {
-    return apiFetch<any[]>('/chat/conversations');
-  },
-
-  getHistory: async (conversationId: string): Promise<Message[]> => {
-    return apiFetch<Message[]>(`/chat/${conversationId}/history`);
-  },
-
-  deleteConversation: async (conversationId: string): Promise<void> => {
-    await apiFetch<void>(`/chat/${conversationId}`, { method: 'DELETE' });
-  },
-
-  streamMessage: async (
-    conversationId: string | null,
-    modelId: string,
-    messages: Message[],
-    onChunk: (chunk: string) => void,
-    signal: AbortSignal,
-    mode: CraftMode = 'standard'
-  ): Promise<{ conversationId: string }> => {
+  submitApproval: async (
+    actionId: string,
+    decision: 'approve' | 'modify' | 'reject',
+    modifiedParams?: Record<string, unknown>,
+    feedback?: string,
+    onChunk?: (chunk: string) => void,
+    onEvent?: (event: SseEventEnvelope) => void,
+    signal?: AbortSignal
+  ): Promise<{ conversationId?: string }> => {
     const token = getAuthToken();
     const baseUrl =
       import.meta.env.VITE_API_BASE_URL !== undefined && import.meta.env.VITE_API_BASE_URL !== ''
         ? import.meta.env.VITE_API_BASE_URL
         : (typeof window !== 'undefined' ? window.location.origin : '');
 
-    const lastUserMessage = messages.filter((m) => m.role === 'user').pop();
-    if (!lastUserMessage) throw new Error('No user message found');
-
-    const response = await fetch(`${baseUrl}/chat/stream`, {
+    const response = await fetch(`${baseUrl}/chat/approval`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({
-        message: lastUserMessage.content,
-        conversation_id: conversationId ? parseInt(conversationId, 10) : null,
-        model: modelId,
-        mode,
+        actionId,
+        decision,
+        modifiedParams,
+        feedback,
       }),
       signal,
     });
@@ -88,16 +61,11 @@ export const chatService = {
     if (!response.ok) {
       if (response.status === 401) throw new Error('Unauthorized — please log in again.');
       if (response.status === 402) throw new Error('Daily token limit exceeded. Please upgrade your plan.');
-      if (response.status === 403) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Selected model requires a higher subscription plan.');
-      }
-      if (response.status === 429) throw new Error('Rate limit exceeded. Please wait a moment.');
       const errData = await response.json().catch(() => ({}));
       throw new Error(errData.detail || `Server error: ${response.statusText}`);
     }
 
-    let resolvedConversationId = conversationId || '';
+    let resolvedConversationId = '';
 
     if (response.body) {
       const reader = response.body.getReader();
@@ -106,36 +74,116 @@ export const chatService = {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        const decoded = done ? decoder.decode() : decoder.decode(value, { stream: true });
+        const { events, remaining } = parseSseBuffer(buffer, decoded, done);
+        buffer = remaining;
 
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          let event: any;
-          try {
-            event = JSON.parse(jsonStr);
-          } catch {
-            // ignore malformed SSE frame
-            continue;
-          }
-
-          if (event.type === 'chunk' && typeof event.content === 'string') {
-            onChunk(event.content);
-          } else if (event.type === 'done' && event.conversation_id) {
-            resolvedConversationId = event.conversation_id.toString();
+        for (const event of events) {
+          onEvent?.(event);
+          if (event.type === 'chunk') {
+            onChunk?.(event.content);
+          } else if (event.type === 'token') {
+            onChunk?.(event.token);
+          } else if (event.type === 'done' && event.conversationId) {
+            resolvedConversationId = event.conversationId;
           } else if (event.type === 'error') {
-            throw new Error(event.error || 'Server error during generation');
+            throw new Error(event.error);
           }
         }
+
+        if (done) break;
       }
     }
 
     return { conversationId: resolvedConversationId };
+  },
+
+  streamMessage: async (
+    conversationId: string | null,
+    modelId: string,
+    messages: Message[],
+    onChunk: (chunk: string) => void,
+    signal: AbortSignal,
+    mode: CraftMode = 'standard',
+    onEvent?: (event: SseEventEnvelope) => void,
+    onStart?: (event: StreamStart) => void
+  ): Promise<{ conversationId: string; modelUsed?: string; modeUsed?: CraftMode }> => {
+    const token = getAuthToken();
+    const last = messages.filter(message => message.role === 'user').pop();
+    if (!last) throw new Error('No user message found');
+    const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+    const response = await fetch(new URL('/chat/stream', base), {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ message: last.content, conversation_id: conversationId ? Number(conversationId) : null,
+                            model: modelId, mode, request_id: crypto.randomUUID() }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      const retryAfter = response.headers.get('Retry-After');
+      throw new Error((data.detail || 'Unable to start generation.') + (retryAfter ? ` Retry after ${retryAfter} seconds.` : ''));
+    }
+    if (!response.body) throw new Error('The server returned no response stream.');
+
+    if (mode !== 'agent') {
+      const done = await readChatStream(response.body, event => {
+        if (event.type === 'chunk') onChunk(event.content);
+        if (event.type === 'start') onStart?.(event);
+      });
+      return {
+        conversationId: String(done.conversation_id),
+        modelUsed: done.model_used,
+        modeUsed: done.mode_used as CraftMode,
+      };
+    }
+
+    let resolvedConversationId = conversationId || '';
+    let resolvedModelUsed: string | undefined;
+    let resolvedModeUsed: CraftMode | undefined;
+    let sawDone = false;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        const decoded = done ? decoder.decode() : decoder.decode(value, { stream: true });
+        const { events, remaining } = parseSseBuffer(buffer, decoded, done);
+        buffer = remaining;
+
+        for (const event of events) {
+          onEvent?.(event);
+          if (event.type === 'chunk') {
+            onChunk(event.content);
+          } else if (event.type === 'token') {
+            onChunk(event.token);
+          } else if (event.type === 'done') {
+            sawDone = true;
+            if (event.conversationId) resolvedConversationId = event.conversationId;
+            if (event.modelUsed) resolvedModelUsed = event.modelUsed;
+            if (event.modeUsed) resolvedModeUsed = event.modeUsed as CraftMode;
+          } else if (event.type === 'error') {
+            throw new Error(event.error);
+          }
+        }
+
+        if (done) break;
+      }
+      if (!sawDone) {
+        throw new Error('Generation was interrupted before completion. Please retry.');
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+
+    return {
+      conversationId: resolvedConversationId,
+      modelUsed: resolvedModelUsed,
+      modeUsed: resolvedModeUsed,
+    };
   },
 };

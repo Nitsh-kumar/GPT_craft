@@ -5,12 +5,14 @@ LangChain StructuredTool instances with fault-tolerant execution wrappers.
 """
 import re
 import json
+import uuid
 import logging
 from typing import Any, Dict, List, Optional, Type
 from pydantic import BaseModel, Field, create_model
 from langchain_core.tools import StructuredTool
+from langgraph.types import interrupt
 
-from app.ai.tools.workspace import TOOL_CAPABILITY_TIERS
+from app.ai.tools.workspace import TOOL_CAPABILITY_TIERS, truncate_tool_output
 
 logger = logging.getLogger(__name__)
 
@@ -119,24 +121,60 @@ def mcp_tool_to_structured_tool(
     client: Any,
     tool_info: Dict[str, Any],
     server_name: str,
-    capability_tier: int = 1,
+    capability_tier: int = 2,
 ) -> StructuredTool:
     """
     Dynamically converts an MCP tool definition into a LangChain StructuredTool.
-    Wraps execution with complete fault tolerance so network drops, timeouts,
-    or process exits return a clean error string without crashing the agent.
+    Defaults to Tier 2 (HITL Approval Card confirmation required) unless explicitly
+    configured otherwise, and wraps execution with output truncation and fault tolerance
+    so network drops, timeouts, or process exits return a clean error string.
     """
     name = tool_info.get("name", "unnamed_tool")
     description = tool_info.get("description") or f"MCP tool from server '{server_name}'"
     input_schema = tool_info.get("inputSchema", {})
 
+    try:
+        resolved_tier = int(capability_tier)
+    except (TypeError, ValueError):
+        resolved_tier = 2
+    if resolved_tier not in (1, 2, 3):
+        resolved_tier = 2
+
     args_model = json_schema_to_pydantic_model(name, input_schema)
 
     def run_mcp_tool(**kwargs) -> str:
-        """Invokes the underlying MCP tool with fault tolerance."""
+        """Invokes the underlying MCP tool with HITL gating (Tier >= 2) and fault tolerance."""
+        final_args = dict(kwargs)
+
+        if resolved_tier >= 2:
+            action_id = f"act_{uuid.uuid4().hex[:8]}"
+            interrupt_payload = {
+                "actionId": action_id,
+                "tool": name,
+                "tier": resolved_tier,
+                "parameters": final_args,
+                "rationale": f"Execute external MCP tool '{name}' on server '{server_name}'",
+            }
+            resume_payload = interrupt(interrupt_payload)
+
+            if not isinstance(resume_payload, dict):
+                return "Action rejected: invalid or missing approval payload."
+
+            decision = str(resume_payload.get("decision") or "").strip().lower()
+            if decision == "reject":
+                feedback = resume_payload.get("feedback") or "Action rejected by user"
+                return f"Action rejected by user. Feedback: {feedback}"
+
+            if decision == "modify":
+                modified_params = resume_payload.get("modifiedParams") or {}
+                if isinstance(modified_params, dict):
+                    final_args.update(modified_params)
+            elif decision != "approve":
+                return f"Action rejected: approval decision '{decision or 'missing'}' is not approved."
+
         try:
-            raw_result = client.call_tool(name, kwargs)
-            return format_mcp_content(raw_result)
+            raw_result = client.call_tool(name, final_args)
+            return truncate_tool_output(format_mcp_content(raw_result))
         except Exception as exc:
             err_msg = str(exc)
             logger.error(
@@ -156,7 +194,7 @@ def mcp_tool_to_structured_tool(
         args_schema=args_model,
     )
 
-    # Register in GPTCraft tool capability tier map (Tier 1 read-only by default)
-    TOOL_CAPABILITY_TIERS[name] = capability_tier
+    # Register in GPTCraft tool capability tier map (Tier 2 HITL confirmation by default)
+    TOOL_CAPABILITY_TIERS[name] = resolved_tier
 
     return structured_tool

@@ -23,6 +23,38 @@ from app.ai.tools.workspace import get_workspace_root
 logger = logging.getLogger(__name__)
 
 DEFAULT_RPC_TIMEOUT_SECONDS = 10.0
+DEFAULT_MCP_CAPABILITY_TIER = 2
+_PRODUCTION_ENV_VALUES = {"prod", "production"}
+_ENV_VAR_NAMES = ("GPTCRAFT_ENV", "APP_ENV", "ENVIRONMENT", "ENV")
+
+
+def is_production_env() -> bool:
+    """Returns True when runtime environment variables indicate a production deployment."""
+    for var in _ENV_VAR_NAMES:
+        if os.getenv(var, "").strip().lower() in _PRODUCTION_ENV_VALUES:
+            return True
+    return False
+
+
+def is_mock_server_config(config: Dict[str, Any]) -> bool:
+    """Returns True if the server definition points to the development mock MCP server."""
+    if not isinstance(config, dict):
+        return False
+    command = str(config.get("command", "")).lower()
+    args = [str(a).lower() for a in (config.get("args") or [])]
+    return "app.ai.mcp.mock_server" in command or any(
+        "app.ai.mcp.mock_server" in a or "mock_server.py" in a for a in args
+    )
+
+
+def is_mock_server_opt_in_enabled() -> bool:
+    """Returns True when local mock MCP server auto-spawn is explicitly enabled via env."""
+    return os.getenv("MCP_ENABLE_MOCK_SERVER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 class MCPError(Exception):
@@ -532,13 +564,41 @@ class MCPManager:
         Instantiates, connects to, and adapts an individual MCP server definition.
         Returns the list of translated StructuredTool instances.
         """
+        if is_mock_server_config(config) and is_production_env():
+            logger.warning(
+                "Refusing to spawn development mock MCP server '%s' in production.",
+                name,
+            )
+            return []
+
         transport = config.get("transport", "stdio").lower()
         effective_timeout = (
             timeout
             if timeout is not None
             else config.get("timeout", DEFAULT_RPC_TIMEOUT_SECONDS)
         )
-        tier = config.get("tier", 1)
+        raw_tier = config.get("tier")
+        if raw_tier is None:
+            tier = DEFAULT_MCP_CAPABILITY_TIER
+        else:
+            try:
+                tier = int(raw_tier)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid capability tier %r for MCP server '%s'; defaulting to Tier %d.",
+                    raw_tier,
+                    name,
+                    DEFAULT_MCP_CAPABILITY_TIER,
+                )
+                tier = DEFAULT_MCP_CAPABILITY_TIER
+            if tier not in (1, 2, 3):
+                logger.warning(
+                    "Unsupported capability tier %s for MCP server '%s'; defaulting to Tier %d.",
+                    tier,
+                    name,
+                    DEFAULT_MCP_CAPABILITY_TIER,
+                )
+                tier = DEFAULT_MCP_CAPABILITY_TIER
 
         client: BaseMCPClient
         if transport == "stdio":
@@ -615,8 +675,18 @@ class MCPManager:
             servers = config.get("mcpServers", {})
 
             for name, s_config in servers.items():
-                if not isinstance(s_config, dict) or s_config.get("disabled"):
+                if not isinstance(s_config, dict):
                     continue
+                is_mock = is_mock_server_config(s_config)
+                if is_mock and is_production_env():
+                    logger.warning(
+                        "Skipping development mock MCP server '%s' in production.",
+                        name,
+                    )
+                    continue
+                if s_config.get("disabled"):
+                    if not (is_mock and is_mock_server_opt_in_enabled()):
+                        continue
                 if name not in self._clients:
                     self.register_server(name, s_config)
 

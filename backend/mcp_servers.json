@@ -4,7 +4,8 @@
       "transport": "stdio",
       "command": "python",
       "args": ["-m", "app.ai.mcp.mock_server"],
-      "env": {}
+      "env": {},
+      "disabled": true
     }
   }
 }

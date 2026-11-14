@@ -16,6 +16,7 @@ from app.db.models import (
     DailyQuota,
     GenerationDetails,
     Message,
+    OAuthAccount,
     Plans,
     QuotaReservation,
     User,
@@ -27,6 +28,12 @@ from app.db.crud_token import insert_once, utc_now
 from app.db.session import engine, SessionLocal
 
 RLS_PROTECTED_MODELS = (
+    Plans,
+    User,
+    OAuthAccount,
+    UserDailyLimit,
+    Conversation,
+    Message,
     DailyQuota,
     QuotaReservation,
     GenerationDetails,
@@ -39,16 +46,23 @@ RLS_PROTECTED_MODELS = (
 )
 
 
+def rls_enable_statements(dialect) -> list[str]:
+    """Build idempotent PostgreSQL ALTER TABLE statements enabling RLS without policies."""
+    preparer = dialect.identifier_preparer
+    return [
+        f'ALTER TABLE {preparer.format_table(model.__table__)} ENABLE ROW LEVEL SECURITY'
+        for model in RLS_PROTECTED_MODELS
+    ]
+
+
 def migrate(bind=engine):
     Base.metadata.create_all(bind)
     with SessionLocal(bind=bind) as db:
         if bind.dialect.name == 'postgresql':
             # These tables are internal to the privileged backend, never browser
             # Data API resources. Owners bypass RLS; public roles get no policies.
-            preparer = bind.dialect.identifier_preparer
-            for model in RLS_PROTECTED_MODELS:
-                quoted = preparer.format_table(model.__table__)
-                db.execute(DDL(f'ALTER TABLE {quoted} ENABLE ROW LEVEL SECURITY'))
+            for stmt in rls_enable_statements(bind.dialect):
+                db.execute(DDL(stmt))
         # Include users without legacy daily rows: deleted/absent quota rows must
         # not erase request usage still evidenced by conversation history.
         today = utc_now().date()

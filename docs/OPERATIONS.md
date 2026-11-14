@@ -36,12 +36,12 @@ allowances, reservations, and checkpoints. The migration creates new tables, imp
 smallest non-negative remaining allowance from duplicate legacy daily rows, and
 backfills request usage from retained user Messages. Deleted historical Messages
 cannot be recovered; historical request counts are a lower bound. Legacy tables
-remain available for rollback. All internal backend tables (`daily_quotas`,
-`quota_reservations`, `generation_details`, `user_preferences`, `user_memories`,
-`agent_approvals`, `agent_checkpoints`, `agent_checkpoint_blobs`, and
-`agent_checkpoint_writes`) have RLS enabled on PostgreSQL via SQLAlchemy `DDL`,
-with no browser policies; the privileged backend owner accesses them. They are not
-resources for direct frontend Data API access.
+remain available for rollback. All internal backend tables (`plans`, `users`, `oauth_accounts`, `user_daily_limit`,
+`conversations`, `messages`, `daily_quotas`, `quota_reservations`, `generation_details`,
+`user_preferences`, `user_memories`, `agent_approvals`, `agent_checkpoints`,
+`agent_checkpoint_blobs`, and `agent_checkpoint_writes`) have RLS enabled on
+PostgreSQL via SQLAlchemy `DDL`, with no browser policies; the privileged backend owner
+accesses them. They are not resources for direct frontend Data API access.
 
 Keep traffic stopped across migration and promotion: mixing old and new
 accounting code can reset or lose usage. On rollback, stop traffic again and

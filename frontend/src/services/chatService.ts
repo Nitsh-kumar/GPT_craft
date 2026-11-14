@@ -9,9 +9,31 @@ import {
   ConversationResponse,
   HistoryMessage,
 } from '../types';
-import { parseSseBuffer } from '../utils/sseParser';
-import { readChatStream } from './stream';
+import { readAgentStream, readChatStream } from './stream';
 import type { StreamStart } from './stream';
+
+function resolveApiBaseUrl(): string {
+  return import.meta.env.VITE_API_BASE_URL !== undefined && import.meta.env.VITE_API_BASE_URL !== ''
+    ? import.meta.env.VITE_API_BASE_URL
+    : (typeof window !== 'undefined' ? window.location.origin : '');
+}
+
+async function throwStreamHttpError(response: Response, fallbackMessage: string): Promise<never> {
+  if (response.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
+  const errData = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    throw new Error(errData.detail || 'Unauthorized — please log in again.');
+  }
+  if (response.status === 402) {
+    throw new Error(errData.detail || 'Daily token limit exceeded. Please upgrade your plan.');
+  }
+  const retryAfter = response.headers.get('Retry-After');
+  throw new Error(
+    (errData.detail || fallbackMessage) + (retryAfter ? ` Retry after ${retryAfter} seconds.` : '')
+  );
+}
 
 export const chatService = {
   getModels: (): Promise<Model[]> => apiFetch<Model[]>('/chat/models'),
@@ -35,15 +57,11 @@ export const chatService = {
     feedback?: string,
     onChunk?: (chunk: string) => void,
     onEvent?: (event: SseEventEnvelope) => void,
-    signal?: AbortSignal
-  ): Promise<{ conversationId?: string }> => {
+    signal?: AbortSignal,
+    onStreamStart?: () => void
+  ): Promise<{ conversationId: string; modelUsed?: string; modeUsed?: CraftMode }> => {
     const token = getAuthToken();
-    const baseUrl =
-      import.meta.env.VITE_API_BASE_URL !== undefined && import.meta.env.VITE_API_BASE_URL !== ''
-        ? import.meta.env.VITE_API_BASE_URL
-        : (typeof window !== 'undefined' ? window.location.origin : '');
-
-    const response = await fetch(`${baseUrl}/chat/approval`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/chat/approval`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -59,43 +77,14 @@ export const chatService = {
     });
 
     if (!response.ok) {
-      if (response.status === 401) throw new Error('Unauthorized — please log in again.');
-      if (response.status === 402) throw new Error('Daily token limit exceeded. Please upgrade your plan.');
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.detail || `Server error: ${response.statusText}`);
+      await throwStreamHttpError(response, `Server error: ${response.statusText}`);
+    }
+    if (!response.body) {
+      throw new Error('The server returned no response stream.');
     }
 
-    let resolvedConversationId = '';
-
-    if (response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        const decoded = done ? decoder.decode() : decoder.decode(value, { stream: true });
-        const { events, remaining } = parseSseBuffer(buffer, decoded, done);
-        buffer = remaining;
-
-        for (const event of events) {
-          onEvent?.(event);
-          if (event.type === 'chunk') {
-            onChunk?.(event.content);
-          } else if (event.type === 'token') {
-            onChunk?.(event.token);
-          } else if (event.type === 'done' && event.conversationId) {
-            resolvedConversationId = event.conversationId;
-          } else if (event.type === 'error') {
-            throw new Error(event.error);
-          }
-        }
-
-        if (done) break;
-      }
-    }
-
-    return { conversationId: resolvedConversationId };
+    onStreamStart?.();
+    return readAgentStream(response.body, { onChunk, onEvent });
   },
 
   streamMessage: async (
@@ -111,7 +100,7 @@ export const chatService = {
     const token = getAuthToken();
     const last = messages.filter(message => message.role === 'user').pop();
     if (!last) throw new Error('No user message found');
-    const base = import.meta.env.VITE_API_BASE_URL || window.location.origin;
+    const base = resolveApiBaseUrl();
     const response = await fetch(new URL('/chat/stream', base), {
       method: 'POST', signal,
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -119,10 +108,7 @@ export const chatService = {
                             model: modelId, mode, request_id: crypto.randomUUID() }),
     });
     if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      if (response.status === 401) window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-      const retryAfter = response.headers.get('Retry-After');
-      throw new Error((data.detail || 'Unable to start generation.') + (retryAfter ? ` Retry after ${retryAfter} seconds.` : ''));
+      await throwStreamHttpError(response, 'Unable to start generation.');
     }
     if (!response.body) throw new Error('The server returned no response stream.');
 
@@ -138,52 +124,10 @@ export const chatService = {
       };
     }
 
-    let resolvedConversationId = conversationId || '';
-    let resolvedModelUsed: string | undefined;
-    let resolvedModeUsed: CraftMode | undefined;
-    let sawDone = false;
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        const decoded = done ? decoder.decode() : decoder.decode(value, { stream: true });
-        const { events, remaining } = parseSseBuffer(buffer, decoded, done);
-        buffer = remaining;
-
-        for (const event of events) {
-          onEvent?.(event);
-          if (event.type === 'chunk') {
-            onChunk(event.content);
-          } else if (event.type === 'token') {
-            onChunk(event.token);
-          } else if (event.type === 'done') {
-            sawDone = true;
-            if (event.conversationId) resolvedConversationId = event.conversationId;
-            if (event.modelUsed) resolvedModelUsed = event.modelUsed;
-            if (event.modeUsed) resolvedModeUsed = event.modeUsed as CraftMode;
-          } else if (event.type === 'error') {
-            throw new Error(event.error);
-          }
-        }
-
-        if (done) break;
-      }
-      if (!sawDone) {
-        throw new Error('Generation was interrupted before completion. Please retry.');
-      }
-    } finally {
-      await reader.cancel().catch(() => undefined);
-      reader.releaseLock();
-    }
-
-    return {
-      conversationId: resolvedConversationId,
-      modelUsed: resolvedModelUsed,
-      modeUsed: resolvedModeUsed,
-    };
+    return readAgentStream(response.body, {
+      onChunk,
+      onEvent,
+      initialConversationId: conversationId || '',
+    });
   },
 };

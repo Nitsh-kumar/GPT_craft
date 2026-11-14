@@ -27,7 +27,7 @@ const PLANS: PlanSpec[] = [
       'GPT-OSS 20B',
       '50 requests / day',
       '5,000 daily tokens',
-      'All 4 Craft Modes',
+      'All 5 Craft Modes (including Agent Studio)',
     ],
     icon: <Sparkles className="text-ink-3" size={20} />,
   },

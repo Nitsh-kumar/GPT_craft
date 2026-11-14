@@ -1,5 +1,6 @@
 """Conversation admission, generation, HITL approval resumption, and durable usage settlement."""
 import asyncio
+import json
 import logging
 from contextlib import aclosing
 from dataclasses import dataclass, field
@@ -53,6 +54,14 @@ class PreparedApproval:
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+def _message_bound_bytes(msg) -> int:
+    total = len(str(getattr(msg, "content", "")).encode("utf-8")) + 64
+    tool_calls = getattr(msg, "tool_calls", None)
+    if tool_calls:
+        total += len(json.dumps(tool_calls, default=str).encode("utf-8"))
+    return total
+
+
 def prompt_bound(messages, mode, user_instructions="", relevant_memories=None):
     # Byte-level upper bound with generous per-message framing overhead. Reserve
     # all history + system instructions + personalization + maximum output.
@@ -63,7 +72,7 @@ def prompt_bound(messages, mode, user_instructions="", relevant_memories=None):
         len(CRAFT_MODES[mode].encode("utf-8"))
         + extra
         + 64
-        + sum(len(str(m.content).encode("utf-8")) + 64 for m in messages)
+        + sum(_message_bound_bytes(m) for m in messages)
         + get_settings().max_output_tokens
     )
 
@@ -81,6 +90,7 @@ def _persist_approval(
     conversation_id: int,
     user_id: int,
     interrupt_item: dict,
+    model_used: Optional[str] = None,
 ) -> dict:
     action_id = interrupt_item.get("actionId") or f"act_{uuid4().hex[:8]}"
     tool_name = interrupt_item.get("tool") or "edit_workspace_file"
@@ -100,6 +110,7 @@ def _persist_approval(
             parameters=parameters,
             rationale=rationale,
             diff=diff,
+            model_used=model_used,
         )
 
     return {
@@ -127,6 +138,17 @@ def _persist_memories(user_id: int, message: str, conversation_id: int) -> None:
 
 class ChatService:
     @staticmethod
+    def _load_personalization(db, user_id: int, query: str) -> tuple[str, list]:
+        prefs = MemoryService.get_preferences(db, user_id)
+        user_instructions = MemoryService.format_user_instructions(prefs)
+        relevant_memories = (
+            MemoryService.get_relevant_memories(db, user_id, query, limit=5)
+            if prefs.memory_enabled and query
+            else []
+        )
+        return user_instructions, relevant_memories
+
+    @staticmethod
     def prepare(
         message,
         conversation_id,
@@ -148,12 +170,8 @@ class ChatService:
                 raise HTTPException(404, "Conversation not found")
             history = ChatCRUD.get_messages_for_conversation(db, conversation_id)
 
-        prefs = MemoryService.get_preferences(db, user_id)
-        user_instructions = MemoryService.format_user_instructions(prefs)
-        relevant_memories = (
-            MemoryService.get_relevant_memories(db, user_id, message, limit=5)
-            if prefs.memory_enabled
-            else []
+        user_instructions, relevant_memories = ChatService._load_personalization(
+            db, user_id, message
         )
 
         messages = [
@@ -211,12 +229,42 @@ class ChatService:
         if approval.status != "pending":
             raise HTTPException(409, f"Approval request is already {approval.status}.")
 
-        model = resolve_model(user_tier, None)
+        model = resolve_model(user_tier, approval.model_used)
+        state = agent.get_state({"configurable": {"thread_id": str(approval.conversation_id)}})
+        state_values = getattr(state, "values", None) or {}
+        messages = list(state_values.get("messages") or [])
+        if not messages:
+            history = ChatCRUD.get_messages_for_conversation(db, approval.conversation_id)
+            messages = [
+                HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content)
+                for m in history
+            ]
+
+        user_instructions = state_values.get("user_instructions")
+        relevant_memories = state_values.get("relevant_memories")
+        if user_instructions is None and relevant_memories is None:
+            last_user = next(
+                (str(m.content) for m in reversed(messages) if isinstance(m, HumanMessage)),
+                "",
+            )
+            user_instructions, relevant_memories = ChatService._load_personalization(
+                db, user_id, last_user
+            )
+
+        resume_extra = len((feedback or "").encode("utf-8")) + (
+            len(json.dumps(modified_params, default=str).encode("utf-8")) if modified_params else 0
+        )
+        bound = prompt_bound(
+            messages,
+            "agent",
+            user_instructions or "",
+            relevant_memories or [],
+        ) + resume_extra
         reservation = TokenUsageCRUD.reserve(
             db,
             user_id,
             user_tier,
-            get_settings().max_output_tokens + 256,
+            bound,
             str(uuid4()),
         )
         try:
@@ -365,6 +413,7 @@ class ChatService:
                         prepared.conversation_id,
                         prepared.user_id,
                         interrupt_item,
+                        prepared.model,
                     )
                     result = await run_in_threadpool(
                         ChatService._settle,

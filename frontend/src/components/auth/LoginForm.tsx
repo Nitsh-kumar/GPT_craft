@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import { formatAuthErrorMessage } from '../../services/authService';
 
 export const LoginForm = () => {
   const { login, loginWithGoogle, isLoading } = useAuth();
@@ -13,21 +14,8 @@ export const LoginForm = () => {
 
   React.useEffect(() => {
     const errorParam = searchParams.get('error');
-    const detailsParam = searchParams.get('details');
-    if (errorParam || detailsParam) {
-      if (detailsParam) {
-        setError(detailsParam);
-      } else if (errorParam === 'auth_failed') {
-        setError('Authentication failed. Please try again.');
-      } else if (errorParam === 'failed_to_get_user_info') {
-        setError('Failed to get user information from Google.');
-      } else if (errorParam === 'invalid_user_data_from_google') {
-        setError('Google did not provide essential account information.');
-      } else if (errorParam === 'session_creation_failed') {
-        setError('Login successful, but we couldn\'t start your session.');
-      } else if (errorParam) {
-        setError(errorParam.replace(/_/g, ' '));
-      }
+    if (errorParam) {
+      setError(formatAuthErrorMessage(errorParam));
     }
   }, [searchParams]);
 

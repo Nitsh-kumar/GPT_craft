@@ -7,5 +7,5 @@ def test_public_plan_mutation_is_disabled(client, registered, plan):
     before = client.get("/chat/quota", headers=headers).json()
     response = client.post("/auth/plan", headers=headers, json={"plan": plan})
     assert response.status_code == 403
-    assert client.get("/auth/me", params={"token": user["accessToken"]}).json()["plan"] == "free"
+    assert client.get("/auth/me", headers=headers).json()["plan"] == "free"
     assert client.get("/chat/quota", headers=headers).json() == before

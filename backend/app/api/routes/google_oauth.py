@@ -1,13 +1,14 @@
+import logging
+import urllib.parse
 from fastapi import APIRouter, Depends, Request, HTTPException
 from authlib.integrations.starlette_client import OAuth
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.config import get_settings
-from app.services.auth import AuthService
-from app.core.security import SecurityService
-from app.db.models import User, OAuthAccount
+from app.services.auth import AuthService, InactiveAccountError
 from starlette.responses import RedirectResponse
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 router = APIRouter(prefix="/auth/google", tags=["google-auth"])
 
@@ -52,57 +53,24 @@ async def callback(request: Request, db: Session = Depends(get_db)):
         
         if not email or not google_id:
             return RedirectResponse(url=f"{FRONTEND_LOGIN_URL}?error=invalid_user_data_from_google")
-        
-        # 1. Check if user already has this Google account linked
-        oauth_account = db.query(OAuthAccount).filter(
-            OAuthAccount.provider == "google",
-            OAuthAccount.provider_user_id == google_id
-        ).first()
-        
-        if oauth_account:
-            user = oauth_account.user
-            # Update tokens
-            oauth_account.access_token = token.get('access_token')
-            oauth_account.refresh_token = token.get('refresh_token', oauth_account.refresh_token)
-            oauth_account.expires_at = token.get('expires_at')
-        else:
-            # 2. Check if user exists by email
-            user = db.query(User).filter(User.email == email).first()
-            if not user:
-                # Create new user with default Free plan (id=1)
-                user = User(
-                    email=email,
-                    name=name or email.split('@')[0],
-                    hashed_password=None,  # OAuth user — no password
-                    plan_id=1 
-                )
-                db.add(user)
-                db.flush()  # Get user.id without committing yet
-            
-            # Link Google account
-            new_oauth = OAuthAccount(
-                user_id=user.id,
-                provider="google",
-                provider_user_id=google_id,
-                access_token=token.get('access_token'),
-                refresh_token=token.get('refresh_token'),
-                expires_at=token.get('expires_at')
-            )
-            db.add(new_oauth)
-        
-        db.commit()
-        
-        # 3. Create app session token (JWT)
-        access_token = SecurityService.create_access_token(user.email)
-        
-        # Redirect back to frontend with token
-        return RedirectResponse(url=f"{FRONTEND_SUCCESS_URL}?token={access_token}")
 
-    except Exception as e:
-        print(f"Google OAuth error: {e}")
-        import traceback
-        traceback.print_exc()
-        # Redirect back to login with error details
-        import urllib.parse
-        error_msg = urllib.parse.quote(str(e))
-        return RedirectResponse(url=f"{FRONTEND_LOGIN_URL}?error=auth_failed&details={error_msg}")
+        try:
+            access_token = AuthService.login_with_google(
+                db,
+                email=email,
+                name=name,
+                google_id=google_id,
+                access_token=token.get("access_token"),
+                refresh_token=token.get("refresh_token"),
+                expires_at=token.get("expires_at"),
+            )
+        except InactiveAccountError:
+            return RedirectResponse(url=f"{FRONTEND_LOGIN_URL}?error=account_inactive")
+
+        # Redirect back to frontend with token in URL fragment (never sent to servers/logs)
+        encoded_token = urllib.parse.quote(access_token, safe=".-_")
+        return RedirectResponse(url=f"{FRONTEND_SUCCESS_URL}#access_token={encoded_token}")
+
+    except Exception:
+        logger.exception("Google OAuth callback failed")
+        return RedirectResponse(url=f"{FRONTEND_LOGIN_URL}?error=auth_failed")

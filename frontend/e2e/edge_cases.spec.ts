@@ -96,9 +96,12 @@ test.describe('GPTCraft Edge Cases, Error Handling & System Controls', () => {
     await page.route('https://offline.invalid/auth/v1/logout**', (route) =>
       route.fulfill({ status: 204, body: '' })
     );
-    await page.route('**/auth/me?**', (route) =>
-      route.fulfill({ json: { id: 1, name: 'Edge Tester', email: uniqueEmail, plan: 'free' } })
-    );
+    await page.route('**/auth/me', (route) => {
+      const url = new URL(route.request().url());
+      expect(url.searchParams.has('token')).toBe(false);
+      expect(route.request().headers()['authorization']).toBe('Bearer offline-test-token');
+      return route.fulfill({ json: { id: 1, name: 'Edge Tester', email: uniqueEmail, plan: 'free' } });
+    });
     await page.route('**/chat/conversations', (route) => route.fulfill({ json: [] }));
 
     await page.goto('/register');
@@ -138,9 +141,12 @@ test.describe('GPTCraft Edge Cases, Error Handling & System Controls', () => {
     let conversations: Array<{ id: number; title: string; created_at: string; updated_at: string }> = [];
 
     await page.addInitScript(() => localStorage.setItem('accessToken', 'offline-test-token'));
-    await page.route('**/auth/me?**', (route) =>
-      route.fulfill({ json: { id: 1, name: 'Delete Tester', email: 'del@gptcraft.dev', plan: 'free' } })
-    );
+    await page.route('**/auth/me', (route) => {
+      const url = new URL(route.request().url());
+      expect(url.searchParams.has('token')).toBe(false);
+      expect(route.request().headers()['authorization']).toBe('Bearer offline-test-token');
+      return route.fulfill({ json: { id: 1, name: 'Delete Tester', email: 'del@gptcraft.dev', plan: 'free' } });
+    });
     await page.route('**/chat/conversations', (route) => route.fulfill({ json: conversations }));
     await page.route('**/chat/stream', (route) => {
       conversations = [
@@ -192,5 +198,26 @@ test.describe('GPTCraft Edge Cases, Error Handling & System Controls', () => {
     const newChatButton = page.getByTestId('new-conversation-button').first();
     await newChatButton.click();
     await expect(page.locator('h1')).toContainText('Studio Workbench');
+  });
+
+  test('5. OAuth fragment handoff uses Bearer header and login ignores raw error details', async ({ page }) => {
+    await page.route('**/auth/me', (route) => {
+      const url = new URL(route.request().url());
+      expect(url.searchParams.has('token')).toBe(false);
+      expect(route.request().headers()['authorization']).toBe('Bearer offline-fragment-token');
+      return route.fulfill({ json: { id: 1, name: 'Fragment User', email: 'frag@gptcraft.dev', plan: 'free' } });
+    });
+    await page.route('**/chat/conversations', (route) => route.fulfill({ json: [] }));
+
+    await page.goto('/auth-success#access_token=offline-fragment-token');
+    await page.waitForURL('**/chat');
+    await expect(page.getByRole('complementary').getByTestId('sidebar-user-name')).toHaveText('Fragment User');
+    expect(page.url()).not.toContain('offline-fragment-token');
+
+    await page.goto('/login?error=account_inactive&details=InjectedRawException');
+    const errorBanner = page.locator('div.text-danger');
+    await expect(errorBanner).toBeVisible();
+    await expect(errorBanner).toContainText('This account is inactive');
+    await expect(errorBanner).not.toContainText('InjectedRawException');
   });
 });

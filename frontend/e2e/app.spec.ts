@@ -3,7 +3,12 @@ import { test, expect } from '@playwright/test';
 // Isolated UI contract checks: no account creation, live auth, or model calls.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('accessToken', 'offline-test-token'));
-  await page.route('**/auth/me?**', route => route.fulfill({ json: { id:1, name:'Test User', email:'test@example.com', plan:'free' } }));
+  await page.route('**/auth/me', route => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.has('token')).toBe(false);
+    expect(route.request().headers()['authorization']).toBe('Bearer offline-test-token');
+    return route.fulfill({ json: { id:1, name:'Test User', email:'test@example.com', plan:'free' } });
+  });
   await page.route('**/chat/models', route => route.fulfill({ json: [
     { id:'openai/gpt-oss-20b', name:'GPT-OSS 20B', description:'Test provider', requiredPlan:'free' },
   ] }));

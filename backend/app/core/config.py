@@ -1,7 +1,25 @@
 from typing import Optional
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+PLACEHOLDER_SECRET_KEYS = frozenset({
+    "",
+    "your-secret-key-change-in-production",
+    "replace_with_a_new_random_secret",
+    "changeme",
+    "change-me",
+    "secret",
+})
+
+
+def validate_runtime_secret_key(settings: "Settings") -> None:
+    """Reject default or placeholder signing secrets when debug mode is disabled."""
+    normalized = (settings.secret_key or "").strip().lower()
+    if not settings.debug and normalized in PLACEHOLDER_SECRET_KEYS:
+        raise ValueError(
+            "SECRET_KEY must be set to a strong non-placeholder value when debug is False"
+        )
 
 
 class Settings(BaseSettings):
@@ -43,6 +61,11 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _validate_secret_key(self) -> "Settings":
+        validate_runtime_secret_key(self)
+        return self
 
 
 @lru_cache()

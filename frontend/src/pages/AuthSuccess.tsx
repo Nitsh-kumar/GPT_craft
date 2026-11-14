@@ -44,21 +44,20 @@ export const AuthSuccess = () => {
           searchParams.get('error') ||
           hashParams.get('error') ||
           hashParams.get('error_code');
-        const oauthErrorDesc =
-          searchParams.get('error_description') ||
-          hashParams.get('error_description') ||
-          searchParams.get('details') ||
-          hashParams.get('details');
 
         if (oauthError) {
-          const details = oauthErrorDesc ? `&details=${encodeURIComponent(oauthErrorDesc)}` : '';
-          doNavigate(`/login?error=${encodeURIComponent(oauthError)}${details}`);
+          doNavigate(`/login?error=${encodeURIComponent(oauthError)}`);
           return;
         }
 
-        // Check for explicit token
-        const explicitToken = searchParams.get('token') || hashParams.get('access_token');
+        // Check for explicit token in URL fragment only (never query string)
+        const explicitToken = hashParams.get('access_token') || hashParams.get('token');
         if (explicitToken) {
+          window.history.replaceState(
+            null,
+            '',
+            `${window.location.pathname}${window.location.search}`
+          );
           await loginWithToken(explicitToken);
           doNavigate('/chat');
           return;
@@ -123,7 +122,7 @@ export const AuthSuccess = () => {
       } catch (err: any) {
         console.error('Failed to complete authentication', err);
         setAuthError(err.message || 'Authentication failed');
-        doNavigate(`/login?error=session_creation_failed&details=${encodeURIComponent(err.message || '')}`);
+        doNavigate('/login?error=session_creation_failed');
       }
     };
 

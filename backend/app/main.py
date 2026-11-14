@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from app.core.config import get_settings
+from app.core.config import get_settings, validate_runtime_secret_key
 from app.db.base import Base
 from app.db.session import engine, SessionLocal
 from app.api.routes.auth import router as auth_router
@@ -13,6 +13,7 @@ from app.db.models import User, Plans
 
 # Initialize settings
 settings = get_settings()
+validate_runtime_secret_key(settings)
 
 # Seed default plans if they don't exist
 def seed_default_plan(bind=engine):

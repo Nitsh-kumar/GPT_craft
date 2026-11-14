@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import { formatAuthErrorMessage } from '../../services/authService';
 
 export const RegisterForm = () => {
   const { register, loginWithGoogle, isLoading } = useAuth();
@@ -14,9 +15,8 @@ export const RegisterForm = () => {
 
   React.useEffect(() => {
     const errorParam = searchParams.get('error');
-    const detailsParam = searchParams.get('details');
     if (errorParam) {
-      setError(detailsParam || errorParam.replace(/_/g, ' '));
+      setError(formatAuthErrorMessage(errorParam));
     }
   }, [searchParams]);
 

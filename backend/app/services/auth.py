@@ -1,14 +1,25 @@
+from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.db.models import User, Plans
-from app.db.crud_token import TokenUsageCRUD
+from app.db.models import User, Plans, OAuthAccount
 from app.core.security import SecurityService
 from app.schemas.auth import UserResponse
-from app.ai.llm import PLAN_QUOTAS
+
+
+class InactiveAccountError(Exception):
+    """Raised when an authenticated account is marked inactive."""
 
 
 class AuthService:
     """Centralized authentication and subscription business logic"""
+
+    @staticmethod
+    def _ensure_active(user: User) -> None:
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive",
+            )
 
     @staticmethod
     def _user_to_response(user: User) -> UserResponse:
@@ -66,11 +77,7 @@ class AuthService:
                 detail="Invalid email or password"
             )
 
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is inactive"
-            )
+        AuthService._ensure_active(user)
         
         access_token = SecurityService.create_access_token(user.email)
         return AuthService._user_to_response(user), access_token
@@ -92,11 +99,14 @@ class AuthService:
         user = None
         if sub:
             user = db.query(User).filter(User.supabase_uid == sub).first()
+            if user:
+                AuthService._ensure_active(user)
         
         # 2. Lookup by email fallback
         if not user:
             user = db.query(User).filter(User.email == email).first()
             if user:
+                AuthService._ensure_active(user)
                 changed = False
                 if sub and not user.supabase_uid:
                     user.supabase_uid = sub
@@ -123,23 +133,63 @@ class AuthService:
             db.commit()
             db.refresh(user)
 
-        # 4. Ensure user daily token limit exists for today
-        user_limit = TokenUsageCRUD.get_user_limit(db, user.id)
-        if not user_limit:
-            plan_name = user.plan.name.lower() if user.plan else "free"
-            TokenUsageCRUD.create_user_limit(
-                db, 
-                user.id, 
-                initial_limit=PLAN_QUOTAS.get(plan_name, {}).get("tokens", 5000)
-            )
-
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is inactive"
-            )
+        AuthService._ensure_active(user)
         
         return AuthService._user_to_response(user)
+
+    @staticmethod
+    def login_with_google(
+        db: Session,
+        *,
+        email: str,
+        name: Optional[str],
+        google_id: str,
+        access_token: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        expires_at: Optional[int] = None,
+    ) -> str:
+        """Resolve or provision a Google OAuth user and issue an app session token."""
+        oauth_account = db.query(OAuthAccount).filter(
+            OAuthAccount.provider == "google",
+            OAuthAccount.provider_user_id == google_id,
+        ).first()
+
+        if oauth_account:
+            user = oauth_account.user
+            if not user.is_active:
+                raise InactiveAccountError()
+            oauth_account.access_token = access_token
+            oauth_account.refresh_token = refresh_token if refresh_token is not None else oauth_account.refresh_token
+            oauth_account.expires_at = expires_at
+        else:
+            user = db.query(User).filter(User.email == email).first()
+            if user and not user.is_active:
+                raise InactiveAccountError()
+            if not user:
+                user = User(
+                    email=email,
+                    name=name or email.split("@")[0],
+                    hashed_password=None,
+                    plan_id=1,
+                )
+                db.add(user)
+                db.flush()
+
+            db.add(
+                OAuthAccount(
+                    user_id=user.id,
+                    provider="google",
+                    provider_user_id=google_id,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expires_at=expires_at,
+                )
+            )
+
+        db.commit()
+        if not user.is_active:
+            raise InactiveAccountError()
+        return SecurityService.create_access_token(user.email)
 
     @staticmethod
     def upgrade_plan(user_id: int, plan_name: str, db: Session) -> UserResponse:

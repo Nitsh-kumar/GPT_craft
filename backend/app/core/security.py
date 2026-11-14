@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import httpx
@@ -11,7 +12,8 @@ pwd_context = CryptContext(
     deprecated="auto"
 )
 
-# In-memory cache for Supabase JWKS public keys
+# In-memory cache for Supabase JWKS public keys (bounded by TTL and url)
+_JWKS_CACHE_TTL_SECONDS = 300
 _JWKS_CACHE: Optional[Dict[str, Any]] = None
 
 
@@ -50,19 +52,78 @@ class SecurityService:
         return encoded_jwt
 
     @staticmethod
-    def _get_supabase_jwks(supabase_url: str) -> Optional[Dict[str, Any]]:
+    def _jwks_has_kid(jwks: Optional[Dict[str, Any]], kid: Optional[str]) -> bool:
+        if not kid or not isinstance(jwks, dict):
+            return True
+        keys = jwks.get("keys")
+        if not isinstance(keys, list):
+            return False
+        return any(isinstance(k, dict) and k.get("kid") == kid for k in keys)
+
+    @staticmethod
+    def _get_supabase_jwks(
+        supabase_url: str,
+        kid: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         global _JWKS_CACHE
-        if _JWKS_CACHE is not None:
-            return _JWKS_CACHE
+        jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        now = time.monotonic()
+
+        cached_jwks: Optional[Dict[str, Any]] = None
+        cache_valid = False
+        if isinstance(_JWKS_CACHE, dict):
+            if (
+                "jwks" in _JWKS_CACHE
+                and "fetched_at" in _JWKS_CACHE
+                and _JWKS_CACHE.get("url") == jwks_url
+                and (now - _JWKS_CACHE["fetched_at"]) < _JWKS_CACHE_TTL_SECONDS
+            ):
+                cached_jwks = _JWKS_CACHE["jwks"]
+                cache_valid = True
+
+        if cache_valid and not force_refresh and SecurityService._jwks_has_kid(cached_jwks, kid):
+            return cached_jwks
+
         try:
-            jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
             response = httpx.get(jwks_url, timeout=5.0)
             if response.status_code == 200:
-                _JWKS_CACHE = response.json()
-                return _JWKS_CACHE
+                jwks = response.json()
+                _JWKS_CACHE = {
+                    "url": jwks_url,
+                    "jwks": jwks,
+                    "fetched_at": now,
+                }
+                return jwks
         except Exception:
             pass
+
+        if cache_valid and not force_refresh:
+            return cached_jwks
         return None
+
+    @staticmethod
+    def _extract_supabase_claims(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        aud = payload.get("aud")
+        valid_aud = (
+            aud == "authenticated"
+            if isinstance(aud, str)
+            else isinstance(aud, list) and "authenticated" in aud
+        )
+        if not valid_aud:
+            return None
+        email = payload.get("email")
+        if not email:
+            return None
+        sub = payload.get("sub")
+        meta = payload.get("user_metadata") or {}
+        name = meta.get("full_name") or meta.get("name") or email.split("@")[0]
+        return {
+            "email": email,
+            "sub": sub,
+            "name": name,
+            "payload": payload,
+        }
 
     @staticmethod
     def decode_token_claims(token: str) -> Optional[Dict[str, Any]]:
@@ -72,10 +133,15 @@ class SecurityService:
         Returns a dictionary containing 'email', 'sub' (if present), and 'name' (if present).
         """
         settings = get_settings()
+        token_kid: Optional[str] = None
+        try:
+            token_kid = jwt.get_unverified_header(token).get("kid")
+        except JWTError:
+            token_kid = None
 
         # 1. Attempt Supabase JWKS verification if Supabase URL is configured
         if settings.supabase_url:
-            jwks = SecurityService._get_supabase_jwks(settings.supabase_url)
+            jwks = SecurityService._get_supabase_jwks(settings.supabase_url, kid=token_kid)
             if jwks:
                 try:
                     payload = jwt.decode(
@@ -83,19 +149,10 @@ class SecurityService:
                         jwks,
                         algorithms=["ES256", "RS256"],
                         audience="authenticated",
-                        options={"verify_aud": False}  # Lenient audience verification
                     )
-                    email = payload.get("email")
-                    sub = payload.get("sub")
-                    meta = payload.get("user_metadata") or {}
-                    name = meta.get("full_name") or meta.get("name") or (email.split("@")[0] if email else "User")
-                    if email:
-                        return {
-                            "email": email,
-                            "sub": sub,
-                            "name": name,
-                            "payload": payload
-                        }
+                    claims = SecurityService._extract_supabase_claims(payload)
+                    if claims:
+                        return claims
                 except JWTError:
                     pass
 
@@ -106,19 +163,11 @@ class SecurityService:
                     token,
                     settings.supabase_jwt_secret,
                     algorithms=["HS256"],
-                    options={"verify_aud": False}
+                    audience="authenticated",
                 )
-                email = payload.get("email")
-                sub = payload.get("sub")
-                meta = payload.get("user_metadata") or {}
-                name = meta.get("full_name") or meta.get("name") or (email.split("@")[0] if email else "User")
-                if email:
-                    return {
-                        "email": email,
-                        "sub": sub,
-                        "name": name,
-                        "payload": payload
-                    }
+                claims = SecurityService._extract_supabase_claims(payload)
+                if claims:
+                    return claims
             except JWTError:
                 pass
 

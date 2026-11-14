@@ -1,29 +1,50 @@
-# GPTCraft — AI Chat & Agent Platform
+# GPTCraft — Personal Agent SaaS Platform
 
-GPTCraft is a full-stack AI conversation platform built with **FastAPI**, **LangGraph**, **SQLAlchemy**, and **Groq** on the backend, and **React 19**, **TypeScript**, **Vite 6**, and **Tailwind CSS v4** on the frontend.
+GPTCraft is transitioning into an **operator-hosted multi-tenant Personal Agent SaaS**, built with **FastAPI**, **LangGraph**, **SQLAlchemy**, and **Groq** on the backend, and **React 19**, **TypeScript**, **Vite 6**, and **Tailwind CSS v4** on the frontend.
+
+Core SaaS pillars include authenticated user accounts, `free` / `super` / `hyper` plan entitlements with durable UTC token quotas, persistent cross-session memory, live Agent Studio telemetry, and Human-in-the-Loop (HITL) approval gates backed by durable database checkpoints.
+
+> [!IMPORTANT]
+> **Multi-Tenant Security Boundaries**: All user conversations, memories, approvals, and LangGraph checkpoints enforce `user_id` ownership and PostgreSQL Row-Level Security (RLS). Host workspace tools ([`backend/app/ai/tools/workspace.py`](backend/app/ai/tools/workspace.py)) and host `stdio` MCP servers ([`backend/app/ai/mcp/manager.py`](backend/app/ai/mcp/manager.py)) are **dev / single-operator gated only** until per-user isolated sandboxes are in place.
 
 ## Repository Architecture (Monorepo)
 
 ```text
 GPT_craft/
 ├── .agents/                # Antigravity (AGY) CLI harness (skills, hooks, scripts)
-├── AGENTS.md               # Root architectural rules for AGY CLI
+├── AGENTS.md               # Root architectural & multi-tenant safety rules
+├── CODING_STANDARDS.md     # Code-review conventions (mattpocock-skills)
+├── DESIGN.md               # Modern Studio token & UI component guide
+├── GLOSSARY.md             # Personal Agent SaaS domain vocabulary
+├── api/                    # Optional Vercel serverless ASGI entrypoint (index.py)
 ├── backend/                # FastAPI + LangGraph + SQLAlchemy backend
 │   ├── AGENTS.md           # Backend-specific agent rules
 │   ├── app/                # Application source (api, ai, core, db, schemas, services)
-│   ├── tests/              # Automated pytest contract and unit test suite
+│   ├── tests/              # Offline pytest contract and unit test suite
 │   ├── .env.example        # Backend environment template
-│   └── requirements.txt    # Python dependencies
+│   ├── mcp_servers.json    # Optional MCP server configuration
+│   ├── requirements.in     # Canonical runtime dependency inputs
+│   ├── requirements.lock   # Committed hashed runtime lockfile
+│   ├── requirements-dev.in # Canonical dev/test dependency inputs
+│   ├── requirements-dev.lock # Committed hashed dev/test lockfile
+│   └── requirements.txt    # Wrapper referencing requirements.lock
 ├── frontend/               # React 19 + TypeScript + Vite 6 + Tailwind v4 SPA
 │   ├── AGENTS.md           # Frontend-specific agent rules
 │   ├── src/                # UI components, hooks, context, API client, types
+│   ├── tests/              # Node unit/stream tests
+│   ├── e2e/                # Playwright browser contract tests
 │   ├── .env.example        # Frontend environment template
-│   └── package.json        # Node dependencies and scripts
-├── docs/                   # Project status and engineering milestones
-└── scripts/                # Cross-stack verification (`verify.ps1`) and dev launcher (`dev.ps1`)
+│   ├── package.json        # Node dependencies and scripts
+│   └── vercel.json         # Optional Vercel frontend-only adapter config
+├── docs/                   # Operations runbook, project status, ADRs, specs
+├── scripts/                # Verification (verify.ps1), dev launcher, hook tests
+├── requirements.txt        # Root wrapper referencing backend/requirements.lock
+└── vercel.json             # Optional Vercel full-stack adapter config
 ```
 
-## Quick Start
+## Quick Start (Local Development)
+
+Requires **Python 3.12** and **Node 24**.
 
 ### 1. Backend Setup (`backend/`)
 
@@ -32,11 +53,12 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-dev.lock
 Copy-Item .env.example .env
-# Edit .env with your DATABASE_URL, GROQ_API_KEY and SECRET_KEY
+# Edit .env with DATABASE_URL, SECRET_KEY, GROQ_API_KEY, and auth settings
 .\.venv\Scripts\python.exe -m app.db.migrate
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+On POSIX shells, use `.venv/bin/python -m pip install --require-hashes -r requirements-dev.lock`. For production/runtime-only installs without test tools, install from `backend/requirements.lock` using `--require-hashes -r requirements.lock`.
 
 Interactive API docs are available at `http://localhost:8000/docs`.
 
@@ -53,12 +75,17 @@ The UI will be served at `http://localhost:3000`.
 
 ## Antigravity (AGY) CLI Harness & Verification
 
-This repository is configured with a native AGY CLI harness:
+This repository is configured with an **Antigravity (AGY) CLI** harness and uses **`mattpocock-skills`** (`code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grilling`, `pr`, `prototype`, `research`, `tdd`, `wizard`, `writing-for-agents`) as primary workflow skills:
+
 - **Hierarchical Rules**: [`AGENTS.md`](AGENTS.md), [`backend/AGENTS.md`](backend/AGENTS.md), and [`frontend/AGENTS.md`](frontend/AGENTS.md).
-- **On-Demand Skills**:
-  - `gptcraft-verify`: Runs full-stack `pytest`, `tsc --noEmit`, and `vite build`.
-  - `gptcraft-dev`: Bootstraps virtual environments, runs local servers, and guides cross-stack feature development.
-- **Session Lifecycle Hook**: [`.agents/hooks.json`](.agents/hooks.json) injects monorepo context at session start.
+- **Local Skills (`.agents/skills/`)**:
+  - `gptcraft-verify`: Runs full-stack `pytest`, frontend unit/stream tests, `tsc --noEmit`, and `vite build`.
+  - `gptcraft-dev`: Bootstraps local environments and guides cross-stack feature work.
+  - `mem0-memory`: Manual developer harness memory operations via [`.agents/scripts/mem0_helper.ps1`](.agents/scripts/mem0_helper.ps1) (strictly developer-only; runtime app memory uses SQL in [`backend/app/services/memory.py`](backend/app/services/memory.py)).
+  - `keploy`: API test case and mock generation.
+  - `mitmproxy`: HTTP/SSE traffic inspection and debugging.
+  - `trivy`: Dependency, container, and IaC security scanning.
+- **Session Lifecycle Hook**: [`.agents/hooks.json`](.agents/hooks.json) invokes [`.agents/scripts/session_start.ps1`](.agents/scripts/session_start.ps1) for fast, offline-safe repository context at session start.
 
 Run the full-stack verification suite anytime with:
 
@@ -66,40 +93,23 @@ Run the full-stack verification suite anytime with:
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ```
 
-## Full-stack deployment on Vercel
+## Self-Hosted Production Deployment (Primary)
 
-Import the repository root with the **Other** framework preset. The root
-`vercel.json` builds and type-checks the Vite frontend into root `public/`,
-which Vercel serves from its CDN. GET/HEAD requests for React pages use
-`index.html`; API requests retain their original paths. In particular, GET
-`/chat` opens the UI while POST `/chat` reaches FastAPI. The Python ASGI function is `api/index.py`. The framework is explicitly unset
-to keep Vite static output and API routing together; the FastAPI framework
-preset routes the whole deployment to the backend and must not be selected.
+GPTCraft's primary architecture is **cloud-agnostic self-hosted**:
 
-Configure `DATABASE_URL` (persistent PostgreSQL), `SECRET_KEY`, `GROQ_API_KEY`,
-`SUPABASE_URL`, and the public `SUPABASE_ANON_KEY` for the deployment environment.
-The Vite build reuses only the public Supabase URL and anon key; optional
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` override those values. Never use
-a Supabase service-role key in these variables. Leave `VITE_API_BASE_URL` unset
-for same-origin API calls. Set production `FRONTEND_URL=https://gptcraft.in`.
+1. **Database & Migration**: Provision PostgreSQL, back up existing data, stop chat traffic, and run [`backend/app/db/migrate.py`](backend/app/db/migrate.py) (`cd backend && python -m app.db.migrate`) as the backend database owner before promoting application code. Migration creates tables and enables PostgreSQL RLS across all internal tables.
+2. **Backend ASGI Server**: Install hashed runtime dependencies (`python -m pip install --require-hashes -r backend/requirements.lock`), configure secrets (`DATABASE_URL`, `SECRET_KEY`, `GROQ_API_KEY`, `FRONTEND_URL`, and optional Google/Supabase auth variables), and serve `app.main:app` with Uvicorn/ASGI.
+3. **Frontend SPA Build & Reverse Proxy**: Build `frontend/` (`npm ci && npm run lint && npm run build`) and serve `frontend/dist` behind a reverse proxy. Forward `/auth/*`, `/chat`, `/chat/*`, `/memory`, `/memory/*`, `/health`, `/docs`, and `/openapi.json` to FastAPI (preserving streaming disconnect propagation for SSE cancellation) and route SPA `GET` paths to `index.html`.
 
-Add `https://gptcraft.in/auth-success` to the Supabase Auth redirect allowlist
-and enable the intended auth providers. Custom domain DNS must be configured
-at the authoritative nameserver provider, which may differ from the registrar.
-Use the exact project-specific records shown by Vercel.
+### Optional PaaS Adapters
 
-After deployment, check `/` and `/login` return HTML, `/health` returns JSON,
-`/chat/models` returns the model catalog, and unauthenticated POST `/chat` is
-rejected by authentication rather than serving HTML. Finish with a real
-sign-in and chat request to verify database and provider credentials.
+- **Vercel ([`vercel.json`](vercel.json), [`frontend/vercel.json`](frontend/vercel.json), [`api/index.py`](api/index.py))**: Import the repository root with the **Other** framework preset (leaving framework unset so root `vercel.json` builds Vite into `public/` and routes API traffic to `api/index.py`). Git auto-deployments are held (`"git": { "deploymentEnabled": false }`). Configure `DATABASE_URL`, `SECRET_KEY`, `GROQ_API_KEY`, `FRONTEND_URL`, and optional `SUPABASE_URL` / public `SUPABASE_ANON_KEY` (never a Supabase service-role key in `VITE_*` variables). Leave `VITE_API_BASE_URL` unset for same-origin calls.
+- **Cloudflare (`gpt-craft-backend`)**: Optional worker/backend adapter; scope build triggers in the Cloudflare dashboard to `main` promotions as documented in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
-## Reliability and release status
+## Reliability and Release Status
 
-Use Python 3.12 and Node 24. Public paid Plan changes are disabled until verified
-billing exists. Models are identified by their actual provider IDs; provider
-errors are never replaced with canned success text. Accounting and streaming
-policies, maintenance-window migration, CI checks, dependency updates, and release
-smoke checks are documented in [docs/OPERATIONS.md](docs/OPERATIONS.md).
-See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for implemented versus planned
-capabilities. Apply the migration **before** promoting this release; application
-startup no longer creates schema automatically.
+Use Python 3.12 and Node 24. Public paid Plan changes remain disabled pending verified billing (`free`, `super`, `hyper` tiers). Models resolve to actual Groq provider IDs (`openai/gpt-oss-20b`, `openai/gpt-oss-120b`); provider errors are never masked with canned success text.
+
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md): Authoritative runtime install, maintenance-window migration, accounting policy, HTTP/SSE contract summary, CI checks, and release smoke checks.
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md): Shipped versus planned capabilities and release gates.
+- [`CODING_STANDARDS.md`](CODING_STANDARDS.md), [`GLOSSARY.md`](GLOSSARY.md), [`DESIGN.md`](DESIGN.md), and `docs/adr/`: Engineering review conventions, domain vocabulary, UI design tokens, and architectural decisions.

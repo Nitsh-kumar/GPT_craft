@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+Developer-only Mem0 preference memory helper for the GPTCraft Personal Agent harness.
+
+.DESCRIPTION
+Provides explicit, on-demand access to developer Mem0 memories scoped by MEM0_USER_ID
+(or -UserId). This helper is strictly for developer preferences and never serves as
+runtime application memory or architecture ground truth.
+#>
 [CmdletBinding()]
 param (
     [Parameter(Position = 0, Mandatory = $true)]
@@ -11,7 +20,7 @@ param (
     [string]$Id,
 
     [Parameter()]
-    [string]$UserId = "nit2314",
+    [string]$UserId = $env:MEM0_USER_ID,
 
     [Parameter()]
     [switch]$Json
@@ -19,9 +28,22 @@ param (
 
 $ErrorActionPreference = "Stop"
 
+$userScopedActions = @("list", "search", "add")
+if ($Action -in $userScopedActions -and [string]::IsNullOrWhiteSpace($UserId)) {
+    Write-Error "Mem0 user scope is required for '$Action'. Set `$env:MEM0_USER_ID or pass -UserId '<user-id>'."
+}
+
+if ($Action -ne "help" -and -not (Get-Command mem0 -ErrorAction SilentlyContinue)) {
+    Write-Error "mem0 CLI is not installed or not on PATH. Install @mem0/cli to use developer preference memory."
+}
+
 switch ($Action) {
     "status" {
-        mem0 status
+        if ($Json) {
+            mem0 --json status
+        } else {
+            mem0 status
+        }
     }
     "list" {
         if ($Json) {
@@ -31,8 +53,8 @@ switch ($Action) {
         }
     }
     "search" {
-        if (-not $QueryOrText) {
-            Write-Error "Please specify search query: .\mem0_helper.ps1 -Action search -QueryOrText 'query'"
+        if ([string]::IsNullOrWhiteSpace($QueryOrText)) {
+            Write-Error "Please specify a search query: pwsh -File .agents/scripts/mem0_helper.ps1 -Action search -QueryOrText 'query'"
         }
         if ($Json) {
             mem0 --json search $QueryOrText --user-id $UserId
@@ -41,8 +63,8 @@ switch ($Action) {
         }
     }
     "add" {
-        if (-not $QueryOrText) {
-            Write-Error "Please specify text to remember: .\mem0_helper.ps1 -Action add -QueryOrText 'text'"
+        if ([string]::IsNullOrWhiteSpace($QueryOrText)) {
+            Write-Error "Please specify text to remember: pwsh -File .agents/scripts/mem0_helper.ps1 -Action add -QueryOrText 'text'"
         }
         if ($Json) {
             mem0 --json add $QueryOrText --user-id $UserId
@@ -51,18 +73,35 @@ switch ($Action) {
         }
     }
     "get" {
-        if (-not $Id) {
-            Write-Error "Please specify memory Id: .\mem0_helper.ps1 -Action get -Id '<id>'"
+        if ([string]::IsNullOrWhiteSpace($Id)) {
+            Write-Error "Please specify memory Id: pwsh -File .agents/scripts/mem0_helper.ps1 -Action get -Id '<id>'"
         }
-        mem0 get $Id
+        if ($Json) {
+            mem0 --json get $Id
+        } else {
+            mem0 get $Id
+        }
     }
     "delete" {
-        if (-not $Id) {
-            Write-Error "Please specify memory Id: .\mem0_helper.ps1 -Action delete -Id '<id>'"
+        if ([string]::IsNullOrWhiteSpace($Id)) {
+            Write-Error "Please specify memory Id: pwsh -File .agents/scripts/mem0_helper.ps1 -Action delete -Id '<id>'"
         }
-        mem0 delete $Id --yes
+        if ($Json) {
+            mem0 --json delete $Id --force
+        } else {
+            mem0 delete $Id --force
+        }
     }
-    Default {
-        mem0 --help
+    "help" {
+        Write-Output "GPTCraft Personal Agent - developer-only Mem0 helper"
+        Write-Output "Actions: status, list, search, add, get, delete, help"
+        Write-Output "User scope (required for list, search, add): `$env:MEM0_USER_ID or -UserId '<user-id>'"
+        if (Get-Command mem0 -ErrorAction SilentlyContinue) {
+            mem0 --help
+        }
     }
+}
+
+if ($Action -ne "help" -and $LASTEXITCODE) {
+    exit $LASTEXITCODE
 }

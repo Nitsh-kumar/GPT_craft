@@ -66,7 +66,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - shell: pwsh
+      - name: Check harness drift
+        shell: pwsh
+        run: ./scripts/check-harness.ps1
+      - name: Test session hook
+        shell: pwsh
         run: ./scripts/test-session-hook.ps1
   browser:
     name: Browser contracts

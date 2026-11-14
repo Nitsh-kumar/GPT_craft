@@ -1,3 +1,23 @@
+# Personal Agent Platform Specification
+
+## Implementation Status & Code Reconciliation
+
+This specification originally captured the Epic #11 Agent Studio design. The core v1 Agent Studio loop is implemented on `staging`, with GPTCraft transitioning toward an operator-hosted multi-tenant Personal Agent SaaS (inspired by Hark Pro). Legacy `CraftMode` (`agent`) and `/chat/*` routes are retained as v1 compatibility identifiers.
+
+Reconciled facts against the current codebase (authoritative over historical prototype notes below):
+
+- **Checkpointer (`backend/app/ai/graph/checkpointer.py`)**: Implemented via custom SQLAlchemy ORM `SQLAlchemyCheckpointSaver` (`agent_checkpoints`, `agent_checkpoint_blobs`, `agent_checkpoint_writes`) supporting both SQLite and PostgreSQL (with RLS enabled in `backend/app/db/migrate.py`), rather than `SqliteSaver` or `PostgresSaver`. Pending approval cards are persisted in `agent_approvals` (`AgentApproval`) and restored via `GET /chat/{conversation_id}/approval`.
+- **Timeouts (`backend/app/core/config.py`, `backend/app/ai/tools/workspace.py`)**: `generation_timeout_seconds` defaults to `60` (`ge=1, le=90`) — not 10 minutes — and `run_terminal_command` enforces a `30`-second default subprocess timeout (`DEFAULT_COMMAND_TIMEOUT_SECONDS = 30`).
+- **Runtime User Memory (`backend/app/services/memory.py`, `backend/app/api/routes/memory.py`)**: Runtime user personalization and episodic memory use pure SQL + regex heuristics (`UserPreferences`, `UserMemory`) at `/memory/preferences`, `/memory`, and `/memory/{memory_id}`. Mem0 is **only** used by the `.agents/` developer harness (`.agents/scripts/mem0_helper.ps1`), not at application runtime.
+- **Built-In Tools & Multi-Tenant Gate (`backend/app/ai/tools/workspace.py`, `backend/app/ai/mcp/manager.py`)**: Only Tier 1 (`read_workspace_file`, `list_workspace_directory`, `search_workspace_symbols`) and Tier 2 (`edit_workspace_file`, `run_terminal_command`) tools are implemented today. **No built-in Tier 3 tools and no built-in web research tool exist yet** (MCP tools adapted by `backend/app/ai/mcp/adapter.py` default to Tier 2 and accept configured tiers `1`, `2`, or `3`). Host workspace tools and host `stdio` MCP servers are **dev / single-operator gated only** until per-user isolated sandboxes exist.
+- **Typed SSE Payloads (`backend/app/services/chat.py`, `backend/app/schemas/chat.py`, `frontend/src/types/index.ts`)**:
+  - `approval_required` emits `actionId`, `tool`, `toolName`, integer `tier`, `parameters`, `rationale`, and `diff`.
+  - Agent Studio `done` emits `status` (`"interrupted"` or `"completed"`), `totalSteps`, `conversationId`, `tokensUsed`, `tokensRemaining`, `modelUsed`, and `modeUsed` (plus `actionId` when `"interrupted"`, and snake_case `usage_estimated` when `"completed"`).
+  - `error` emits `status`, `error`, and `conversationId`.
+- **Verified Test Seams**: HTTP/SSE, tool guardrail, checkpointer, MCP, and memory tests live in `backend/tests/test_agent_studio.py`, `backend/tests/test_checkpointer.py`, `backend/tests/test_mcp.py`, `backend/tests/test_quotas.py`, and `backend/tests/test_memory.py` (`test_streaming_sse_endpoint`), plus frontend unit/E2E suites (`frontend/tests/stream.test.ts`, `frontend/src/utils/sseParser.test.ts`, `frontend/src/utils/chatReducers.test.ts`, `frontend/src/utils/telemetry.test.ts`, `frontend/e2e/app.spec.ts`). The historical reference below to `tests/test_api.py::test_sse_stream_endpoint_and_quota_exhaustion` is superseded by those files.
+
+---
+
 ## Problem Statement
 
 Users of GPTCraft currently interact with a passive conversational AI assistant. While it generates high-quality text and code suggestions, it cannot interact with the user's local workspace, run automated test suites, inspect files, or execute tools on their behalf. Users are forced to manually copy code between the browser and their IDE, run terminal commands themselves, paste error messages back into the chat, and repeat instructions across sessions. Existing external personal agents (such as Open Interpreter or AutoGPT) either suffer from unsafe terminal execution and prompt context explosion or fall into non-deterministic planning loops without human-in-the-loop safety controls.

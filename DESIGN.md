@@ -1,6 +1,6 @@
 ---
 name: GPTCraft Modern Studio
-description: High-precision atelier and conversational workbench with dual theme, crisp slate alabaster palette, and electric cobalt accent
+description: High-precision Personal Agent SaaS workbench with dual theme, crisp slate alabaster palette, and electric cobalt accent
 colors:
   primary: "#2563eb"
   primary-hover: "#1d4ed8"
@@ -51,48 +51,45 @@ components:
 
 ## Overview
 
-GPTCraft's "Modern Studio / Precision Atelier" system is designed for power users, engineers, and creators who need a high-performance, distraction-free AI workbench. Rejecting generic paper metaphors and neon cyber-slop alike, it balances crisp architectural structure with high-contrast precision.
+GPTCraft's "Modern Studio / Precision Atelier" design system supports an operator-hosted Personal Agent workbench. Defined in [`frontend/src/index.css`](frontend/src/index.css), it balances crisp architectural structure, high-contrast typography, and clear visual hierarchy for live agent telemetry, Human-in-the-Loop (HITL) approval gates, and persistent personalization.
 
-## Colors
+## Colors & Semantic Tokens
 
-- **Canvas & Surface**: Crisp alabaster (`#f8fafc` / `#ffffff`) in light mode; deep studio obsidian (`#090d16` / `#0f172a`) in dark mode.
-- **Ink (Text)**: Slate hierarchy. Deep midnight slate (`#0f172a` light / `#f8fafc` dark) meeting WCAG AAA contrast (>12:1). Secondary text (`--ink-2`) and muted metadata (`--ink-3`) maintain minimum 4.5:1 ratio.
-- **Signature Accent (Cobalt)**: Electric hyper-cobalt (`#2563eb` light, `#3b82f6` dark) used for active modes, primary send trigger, and active indicators.
-- **Functional Status**: Forest green (`--ok`), amber ochre (`--warn`), and red crimson (`--danger`).
+- **Canvas & Surface**: Crisp alabaster (`--canvas: #f8fafc`, `--surface: #ffffff`, `--sunken: #f1f5f9`) in light mode; deep obsidian (`--canvas: #090d16`, `--surface: #0f172a`, `--raised: #182234`, `--sunken: #05080e`) in dark mode.
+- **Ink (Text) & Hairlines**: Midnight-to-muted slate hierarchy (`--ink`, `--ink-2`, `--ink-3`) and 1px structural borders (`--line`, `--line-strong`).
+- **Signature Accent (Cobalt)**: Electric cobalt (`--accent: #2563eb` light / `#3b82f6` dark, with `--accent-hover`, `--accent-soft`, `--on-accent`, plus legacy `--ember*` aliases) for active modes, primary actions, and running agent highlights.
+- **Functional Status**: Forest green (`--ok`), amber ochre (`--warn`), and crimson (`--danger` / `--danger-soft`) for quota thresholds, HITL capability gates, diff additions/deletions, and execution outcomes.
 
 ## Typography
 
-- **Headings & Brand**: `Outfit` geometric sans with tight tracking (`-0.03em`) and crisp architectural punch.
-- **Interface & Reading**: `Inter` sans-serif with tabular numerals for metrics and high-readability `.prose-craft` styling.
-- **Code & Telemetry**: `JetBrains Mono` for code blocks, model identifiers, and Groq LPU latency tags.
+- **Headings & Brand**: `Outfit` geometric sans (`font-display`) with tight tracking (`-0.03em`).
+- **Interface & Reading**: `Inter` sans-serif with `tabular-nums` for quota counters and `.prose-craft` markdown rendering.
+- **Code & Telemetry**: `JetBrains Mono` (`font-mono`) for code blocks, unified diffs, terminal command viewers, model identifiers, and latency tags.
 
-## Layout
+## Layout & Surfaces
 
-- **Studio Workbench Empty State**: 4 interactive Craft Mode workbench tiles (Deep Architect, Code Craft, Brainstorm, Standard Craft) with direct sample prompts and speed/capability indicators.
-- **Message Stream**: Clear separation between prompt and response; assistant responses feature a dedicated meta header with model name, mode badge, and one-click copy.
-- **Input Cockpit**: Elevated command dock with integrated mode tabs, fast model selector, and responsive textarea.
+- **Studio Workbench Empty State** ([`MessageList.tsx`](frontend/src/components/chat/MessageList.tsx)): Displays the active model indicator, greeting, 4 v1 Craft Mode starter tiles (`Deep Architect`, `Code Craft`, `Brainstorm`, `Standard Craft`), and a full-width featured `Agent Studio` card.
+- **Message Stream** ([`MessageBubble.tsx`](frontend/src/components/chat/MessageBubble.tsx)): Separates right-aligned user prompts from structured assistant cards featuring a metadata header (brand mark, model chip, mode/AGENT badge, copy button), collapsible `TelemetryDrawer`, `.prose-craft` markdown output, and inline `ApprovalCard` when interrupted.
+- **Input Cockpit** ([`ChatInput.tsx`](frontend/src/components/chat/ChatInput.tsx)): Elevated command dock (`rounded-2xl border-line-strong bg-raised shadow-lift`) housing the auto-resizing prompt textarea, model selector, mode switcher (including `Agent Studio` with `STUDIO` badge), memory status indicator, and send/stop controls.
+- **Sidebar & Personalization Entry** ([`MainLayout.tsx`](frontend/src/components/layout/MainLayout.tsx)): Responsive conversation drawer with new-conversation action, history list, delete controls, and modal trigger for `PersonalizationModal`.
 
-## Elevation & Depth
+## Elevation & Shapes
 
-- **Subtle Elevation**: `shadow-lift` and `shadow-float` for tactile distinction without muddy blur halos.
-- **Structural Lines**: 1px crisp borders (`--line` and `--line-strong`) delineating workbench panels and code blocks.
+- **Subtle Elevation**: `shadow-lift` and `shadow-float` utilities without heavy blur halos.
+- **Structural Lines & Radii**: 1px crisp borders (`--line`, `--line-strong`), `rounded-xl` / `rounded-2xl` containers, and `rounded-full` pill selectors.
 
-## Shapes
+## Personal Agent & Workbench Components
 
-- Rounded pill controls for segmented mode selectors and theme toggles.
-- Clean 10px-14px corner radii for workbench cards and message containers.
-
-## Components
-
-- **ThemeSwitcher**: Segmented Light / Dark / System control with circular ink-spread view transitions.
-- **MessageBubble**: Assistant responses with structured metadata header and code inspection container.
-- **MessageList**: Interactive Craft Mode studio workbench.
-- **ChatInput**: Minimalist dock with model dropdown and mode filters.
-- **QuotaDisplay**: Tabular real-time usage counter.
+- **Agent Studio Workbench & Input** ([`MessageList.tsx`](frontend/src/components/chat/MessageList.tsx), [`ChatInput.tsx`](frontend/src/components/chat/ChatInput.tsx)): Mode selection and starter prompts bridging v1 Craft Modes and Agent Studio execution.
+- **ApprovalCard** ([`ApprovalCard.tsx`](frontend/src/components/chat/ApprovalCard.tsx)): Inline Tier 2+ HITL gate card (`border-warn/40 bg-surface/80`) rendering tool identifier, `Tier {tier} HITL` badge, rationale, target path or shell command pill, collapsible preview (line-numbered unified diff viewer with `--ok`/`--danger` highlights or copyable terminal command viewer), and three decision modes: `Reject with Feedback`, `Modify Diff` / `Modify Command`, and `Approve & Run`.
+- **TelemetryDrawer** ([`TelemetryDrawer.tsx`](frontend/src/components/chat/TelemetryDrawer.tsx)): Collapsible per-turn execution inspector showing a summary bar (running/failed/completed badge, tool call & thought counts, capability tier chips, aggregated latency) and expandable sections for numbered `Model Reasoning Trace` and per-action `Workspace Tool Executions` (tier badge, duration, exit/status badge, JSON parameters, copyable stdout/stderr).
+- **PersonalizationModal** ([`PersonalizationModal.tsx`](frontend/src/components/chat/PersonalizationModal.tsx)): Two-tab dialog (`Custom Instructions` with profile/style textareas and preset chips; `Remembered Facts` with master `Persistent Memory Active` toggle, categorized add-memory form for `general`/`tech_stack`/`project`/`preference`, per-item delete, and `Clear all memories`).
+- **QuotaDisplay** ([`QuotaDisplay.tsx`](frontend/src/components/chat/QuotaDisplay.tsx)): Tabular daily remaining request and token counter with `--warn` and `--danger` threshold styling.
+- **ThemeSwitcher** ([`ThemeSwitcher.tsx`](frontend/src/components/layout/ThemeSwitcher.tsx)): Segmented Light / Dark / System radio pill triggering ink-spread theme transitions.
 
 ## Do's and Don'ts
 
-- **Do** maintain strict WCAG AAA contrast for all body copy.
-- **Do** showcase model information, mode context, and telemetry clearly.
-- **Don't** use warm sepia/terracotta paper aesthetics that mimic Claude.
+- **Do** use semantic CSS variables from [`frontend/src/index.css`](frontend/src/index.css) and verify WCAG contrast in both light and dark modes.
+- **Do** surface agent rationale, capability tiers, and tool outputs transparently via `ApprovalCard` and `TelemetryDrawer`.
+- **Don't** document unimplemented agent UI screens (such as a credential vault UI or integrations marketplace) as shipped surfaces until built.
 - **Don't** use decorative glowing text shadows or oversized blur halos.
